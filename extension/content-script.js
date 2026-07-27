@@ -9,7 +9,7 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
 
 const WS_URL = 'ws://127.0.0.1:4844'
 const RECONNECT_DELAY = 2000
-const LIVE_OBSERVER_ENABLED = false
+const LIVE_OBSERVER_ENABLED = false // с v0.2.0 основной режим — snapshot по кнопке «Начать/Стоп»
 
 const snap = () => globalThis.VisbugMcpSnapshot
 const guides = () => globalThis.VisbugMcpAlignmentGuides
@@ -42,12 +42,6 @@ function connect() {
         textWatch()?.stop()
         const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
         removed.forEach(k => localStorage.removeItem(k))
-      }
-      if (msg.event === 'recording-capture-before') {
-        startRecordingSnapshot()
-      }
-      if (msg.event === 'recording-capture-after') {
-        finishRecordingSnapshot()
       }
     } catch {}
   })
@@ -91,11 +85,6 @@ function getSelector(el) {
   } catch {
     return 'body'
   }
-}
-
-function resolveSnapshotRoot() {
-  if (recordingScopeRoot?.isConnected) return recordingScopeRoot
-  return snap().getDefaultSnapshotRoot(document)
 }
 
 function startRecordingSnapshot() {
@@ -155,83 +144,7 @@ function finishRecordingSnapshot() {
   })
 }
 
-// ─── Live observer (опционально, выключен по умолчанию) ─────────────────────
-
-const VISBUG_ATTR = ['style', 'class', 'src', 'href', 'alt', 'title', 'contenteditable']
-
-function parseCSSChanges(oldStyle, newStyle) {
-  const parse = s => {
-    const map = {}
-    if (!s) return map
-    s.split(';').forEach(decl => {
-      const [prop, ...rest] = decl.split(':')
-      if (prop && rest.length) map[prop.trim()] = rest.join(':').trim()
-    })
-    return map
-  }
-  const oldMap = parse(oldStyle)
-  const newMap = parse(newStyle)
-  const allProps = new Set([...Object.keys(oldMap), ...Object.keys(newMap)])
-  const changes = []
-  allProps.forEach(prop => {
-    if (oldMap[prop] !== newMap[prop]) {
-      changes.push({ property: prop, old: oldMap[prop] || null, new: newMap[prop] || null })
-    }
-  })
-  return changes
-}
-
-function parseMutation(record) {
-  const el = record.target
-  const selector = getSelector(el)
-  const timestamp = Date.now()
-
-  if (record.type === 'attributes') {
-    const attr = record.attributeName
-    if (attr === 'style') {
-      return parseCSSChanges(record.oldValue, el.getAttribute(attr)).map(c => ({
-        type: 'style', selector, property: c.property,
-        oldValue: c.old, newValue: c.new, tag: el.tagName.toLowerCase(), timestamp,
-      }))
-    }
-    return [{ type: 'attribute', selector, attribute: attr,
-      oldValue: record.oldValue, newValue: el.getAttribute(attr),
-      tag: el.tagName.toLowerCase(), timestamp }]
-  }
-
-  if (record.type === 'characterData') {
-    return [{ type: 'text', selector: getSelector(el.parentElement),
-      oldValue: record.oldValue, newValue: el.textContent,
-      tag: el.parentElement?.tagName.toLowerCase(), timestamp }]
-  }
-
-  return []
-}
-
-function isVisBugInternal(record) {
-  const tag = record.target?.tagName?.toLowerCase()
-  return tag?.startsWith('vis-') || tag?.startsWith('visbug') || tag?.startsWith('eye-') || tag === 'visbug'
-}
-
-if (LIVE_OBSERVER_ENABLED) {
-  const observer = new MutationObserver(records => {
-    const mutations = []
-    records.forEach(record => {
-      if (isVisBugInternal(record)) return
-      if (record.type === 'attributes' && !VISBUG_ATTR.includes(record.attributeName)) return
-      mutations.push(...parseMutation(record))
-    })
-    if (mutations.length === 0) return
-    send({ event: 'mutations', url: location.href, mutations })
-  })
-
-  observer.observe(document.documentElement, {
-    attributes: true, attributeOldValue: true,
-    characterData: true, characterDataOldValue: true,
-    childList: true, subtree: true,
-    attributeFilter: VISBUG_ATTR,
-  })
-}
+// Live observer отключён — см. LIVE_MUTATIONS_ENABLED в ws-daemon.js
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'visbug-ping') {

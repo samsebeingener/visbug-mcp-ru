@@ -6,7 +6,7 @@
  * - команда visbug-mcp-update.md копируется в workspace, если её нет
  */
 
-import { spawnSync } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import {
   existsSync,
   readFileSync,
@@ -60,18 +60,20 @@ function mergeConfigPreservingUser() {
   return merged
 }
 
-function syncUpdateCommand(workspace) {
+function syncWorkspaceCommands(workspace) {
   if (!workspace || !existsSync(workspace)) return
-  const src = join(REPO_ROOT, '.cursor', 'commands', 'visbug-mcp-update.md')
   const destDir = join(workspace, '.cursor', 'commands')
-  const dest = join(destDir, 'visbug-mcp-update.md')
-  if (!existsSync(src)) return
   mkdirSync(destDir, { recursive: true })
-  if (!existsSync(dest)) {
-    copyFileSync(src, dest)
-    console.log(`✅ Команда /visbug-mcp-update → ${dest}`)
-  } else {
-    console.log(`○ Команда уже есть: ${dest} (не перезаписываем)`)
+  for (const name of ['visbug-mcp-update.md', 'visbug-apply.md']) {
+    const src = join(REPO_ROOT, '.cursor', 'commands', name)
+    const dest = join(destDir, name)
+    if (!existsSync(src)) continue
+    if (!existsSync(dest)) {
+      copyFileSync(src, dest)
+      console.log(`✅ Команда /${name.replace('.md', '')} → ${dest}`)
+    } else {
+      console.log(`○ Команда уже есть: ${dest} (не перезаписываем)`)
+    }
   }
 }
 
@@ -82,10 +84,15 @@ function restartDaemon() {
       '-ExecutionPolicy', 'Bypass',
       '-File', join(REPO_ROOT, 'scripts', 'start-ws-daemon.ps1'),
     ], { inherit: true })
-  } else {
-    run('node', ['src/ws-daemon.js'], { detached: true, stdio: 'ignore' })
-    console.log('✅ Демон перезапущен')
+    return
   }
+  const child = spawn('node', [join(REPO_ROOT, 'src', 'ws-daemon.js')], {
+    cwd: REPO_ROOT,
+    detached: true,
+    stdio: 'ignore',
+  })
+  child.unref()
+  console.log('✅ Демон перезапущен')
 }
 
 function readVersion() {
@@ -130,7 +137,7 @@ async function main() {
   }
 
   const config = mergeConfigPreservingUser()
-  syncUpdateCommand(config.autoAgent?.workspace)
+  syncWorkspaceCommands(config.autoAgent?.workspace)
 
   clearPendingUpdate()
   restartDaemon()

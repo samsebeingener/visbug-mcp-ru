@@ -1,5 +1,7 @@
 // popup.js — режим «Запись» (snapshot до/после)
-const ws = new WebSocket('ws://127.0.0.1:4844')
+const WS_URL = 'ws://127.0.0.1:4844'
+const RECONNECT_MS = 2000
+
 const dot = document.getElementById('dot')
 const statusEl = document.getElementById('status')
 const count = document.getElementById('count')
@@ -11,9 +13,30 @@ const recordBtn = document.getElementById('record-btn')
 const clearBtn = document.getElementById('clear-btn')
 const copyBtn = document.getElementById('copy-btn')
 
+let ws = null
+let reconnectTimer = null
 let cachedChangesText = ''
 let recording = false
 let connected = false
+
+function wsSend(payload) {
+  if (connected && ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(payload))
+  }
+}
+
+function setOfflineUi() {
+  connected = false
+  setRecording(false)
+  dot.className = 'dot off'
+  statusEl.textContent = 'MCP-сервер не запущен'
+  count.textContent = 'В буфере правок: 0'
+  renderHealth(null)
+  recordBtn.disabled = true
+  clearBtn.disabled = true
+  copyBtn.disabled = true
+  cachedChangesText = ''
+}
 
 function setRecording(active) {
   recording = active
@@ -78,12 +101,12 @@ function renderHealth(h) {
     const mark = ok ? '✓' : (neutral ? '○' : '✗')
     return `<span class="${cls}">${mark}</span> ${label}`
   }
-  const ws = h.workspace ? (h.workspace.length > 28 ? `…${h.workspace.slice(-26)}` : h.workspace) : 'не задан'
+  const wsPath = h.workspace ? (h.workspace.length > 28 ? `…${h.workspace.slice(-26)}` : h.workspace) : 'не задан'
   const fileApplyOk = Boolean(h.autoAgentEnabled && h.workspace)
   const lines = [
     line(true, 'Демон'),
     line(h.mcpConfigured, 'MCP в Cursor'),
-    line(fileApplyOk, `Запись в файлы после Стоп → ${ws}`),
+    line(fileApplyOk, `Запись в файлы после Стоп → ${wsPath}`),
   ]
   if (h.cursorCli && h.spawnCli) {
     const cliLabel = h.cursorCliCommand
@@ -101,87 +124,99 @@ function renderHealth(h) {
 }
 
 function refreshHealth() {
-  if (connected) ws.send(JSON.stringify({ event: 'popup-health' }))
+  wsSend({ event: 'popup-health' })
 }
 
 function refreshStats() {
   if (connected) {
-    ws.send(JSON.stringify({ event: 'popup-ping' }))
+    wsSend({ event: 'popup-ping' })
     refreshHealth()
   }
 }
 
-ws.onopen = () => {
-  connected = true
-  recordBtn.disabled = false
-  clearBtn.disabled = false
-  copyBtn.disabled = false
-  refreshStats()
+function scheduleReconnect() {
+  if (reconnectTimer) return
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null
+    connectWs()
+  }, RECONNECT_MS)
 }
 
-ws.onmessage = (e) => {
-  try {
-    const data = JSON.parse(e.data)
-    if (data.event === 'update-available') {
-      showUpdateBanner(data)
-      if (data.message) statusEl.textContent = data.message
-    }
-    if (data.event === 'stats') {
-      count.textContent = `В буфере правок: ${data.total}`
-      cachedChangesText = data.changesText ?? ''
-      if (typeof data.recording === 'boolean') setRecording(data.recording)
-      if (data.health) renderHealth({ ...data.health, cursorCli: data.health.cursorCli })
-    }
-    if (data.event === 'health') {
-      renderHealth(data)
-    }
-    if (data.event === 'auto-applied-partial' || data.event === 'apply-incomplete') {
-      statusEl.textContent = data.message
-        || `Частично: ${data.applied ?? 0} в файлы; не применено: ${data.remaining ?? '?'}. /visbug-apply в Cursor`
-    }
-    if (data.event === 'auto-applied') {
-      const files = (data.files ?? []).length ? ` → ${data.files.join(', ')}` : ''
-      statusEl.textContent = data.remaining
-        ? `Применено ${data.applied} в файлы${files}; осталось ${data.remaining}`
-        : `Готово: ${data.applied} правок в файлы${files}`
-    }
-    if (data.event === 'auto-agent-started') {
-      statusEl.textContent = data.message || `Агент обрабатывает ${data.total} правок…`
-    }
-    if (data.event === 'auto-agent-skipped') {
-      statusEl.textContent = `Запись OK; auto-agent: ${data.reason}`
-    }
-    if (data.event === 'recording-armed') {
-      setRecording(true)
-      recordBtn.disabled = false
-    }
-    if (data.event === 'recording-finished') {
-      setRecording(false)
-      recordBtn.disabled = false
-      count.textContent = `В буфере правок: ${data.total ?? 0}`
-      refreshStats()
-    }
-    if (data.event === 'recording-error') {
-      setRecording(false)
-      recordBtn.disabled = false
-      statusEl.textContent = data.message ?? 'Ошибка записи'
-      refreshStats()
-    }
-  } catch {}
+function connectWs() {
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+    return
+  }
+
+  ws = new WebSocket(WS_URL)
+
+  ws.onopen = () => {
+    connected = true
+    recordBtn.disabled = false
+    clearBtn.disabled = false
+    copyBtn.disabled = false
+    refreshStats()
+  }
+
+  ws.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data)
+      if (data.event === 'update-available') {
+        showUpdateBanner(data)
+        if (data.message) statusEl.textContent = data.message
+      }
+      if (data.event === 'stats') {
+        count.textContent = `В буфере правок: ${data.total}`
+        cachedChangesText = data.changesText ?? ''
+        if (typeof data.recording === 'boolean') setRecording(data.recording)
+        if (data.health) renderHealth({ ...data.health, cursorCli: data.health.cursorCli })
+      }
+      if (data.event === 'health') {
+        renderHealth(data)
+      }
+      if (data.event === 'auto-applied-partial' || data.event === 'apply-incomplete') {
+        statusEl.textContent = data.message
+          || `Частично: ${data.applied ?? 0} в файлы; не применено: ${data.remaining ?? '?'}. /visbug-apply в Cursor`
+      }
+      if (data.event === 'auto-applied') {
+        const files = (data.files ?? []).length ? ` → ${data.files.join(', ')}` : ''
+        statusEl.textContent = data.remaining
+          ? `Применено ${data.applied} в файлы${files}; осталось ${data.remaining}`
+          : `Готово: ${data.applied} правок в файлы${files}`
+      }
+      if (data.event === 'auto-agent-started') {
+        statusEl.textContent = data.message || `Агент обрабатывает ${data.total} правок…`
+      }
+      if (data.event === 'auto-agent-skipped') {
+        statusEl.textContent = `Запись OK; auto-agent: ${data.reason}`
+      }
+      if (data.event === 'recording-armed') {
+        setRecording(true)
+        recordBtn.disabled = false
+      }
+      if (data.event === 'recording-finished') {
+        setRecording(false)
+        recordBtn.disabled = false
+        count.textContent = `В буфере правок: ${data.total ?? 0}`
+        refreshStats()
+      }
+      if (data.event === 'recording-error') {
+        setRecording(false)
+        recordBtn.disabled = false
+        statusEl.textContent = data.message ?? 'Ошибка записи'
+        refreshStats()
+      }
+    } catch {}
+  }
+
+  ws.onerror = () => {}
+
+  ws.onclose = () => {
+    setOfflineUi()
+    scheduleReconnect()
+  }
 }
 
-ws.onerror = ws.onclose = () => {
-  connected = false
-  setRecording(false)
-  dot.className = 'dot off'
-  statusEl.textContent = 'MCP-сервер не запущен'
-  count.textContent = 'В буфере правок: 0'
-  renderHealth(null)
-  recordBtn.disabled = true
-  clearBtn.disabled = true
-  copyBtn.disabled = true
-  cachedChangesText = ''
-}
+connectWs()
 
 function notifyTabRecording(action) {
   return new Promise((resolve) => {
@@ -204,13 +239,13 @@ recordBtn.addEventListener('click', async () => {
     recordBtn.textContent = 'Завершение…'
     const tabRes = await notifyTabRecording('stop')
     if (!tabRes.ok) {
-      ws.send(JSON.stringify({ event: 'popup-recording-cancel' }))
+      wsSend({ event: 'popup-recording-cancel' })
       recordBtn.disabled = false
       setRecording(false)
       statusEl.textContent = tabRes.error ?? 'Не удалось завершить запись'
       return
     }
-    ws.send(JSON.stringify({ event: 'popup-recording-stop' }))
+    wsSend({ event: 'popup-recording-stop' })
     return
   }
 
@@ -223,11 +258,11 @@ recordBtn.addEventListener('click', async () => {
     statusEl.textContent = tabRes.error ?? 'Не удалось начать запись'
     return
   }
-  ws.send(JSON.stringify({ event: 'popup-recording-start' }))
+  wsSend({ event: 'popup-recording-start' })
 })
 
 clearBtn.addEventListener('click', () => {
-  ws.send(JSON.stringify({ event: 'popup-clear' }))
+  wsSend({ event: 'popup-clear' })
   count.textContent = 'В буфере правок: 0'
   cachedChangesText = ''
   setRecording(false)

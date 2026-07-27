@@ -17,4 +17,5 @@ foreach ($c in $conns) {
 
 $node = (Get-Command node -ErrorAction Stop).Source
 Start-Process -FilePath $node -ArgumentList "src/ws-daemon.js" -WorkingDirectory $Root -WindowStyle Hidden
-Write-Host "visbug-ws v0.6.9 restarted (spawnCli off = no terminal). Reload extension."
+$pkg = Get-Content (Join-Path $Root "package.json") -Raw | ConvertFrom-Json
+Write-Host "visbug-ws v$($pkg.version) restarted (spawnCli off = no terminal). Reload extension."

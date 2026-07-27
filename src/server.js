@@ -16,6 +16,7 @@ import { formatChangesFromStore } from './parser.js'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
+import { PACKAGE_VERSION } from './version.js'
 
 const STORE_DIR = join(homedir(), '.visbug-mcp')
 const STORE_FILE = join(STORE_DIR, 'changes.json')
@@ -38,7 +39,7 @@ function writeStore(changes) {
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 
 const mcpServer = new Server(
-  { name: 'visbug-mcp', version: '0.6.1' },
+  { name: 'visbug-mcp', version: PACKAGE_VERSION },
   { capabilities: { tools: {} } }
 )
 
@@ -61,7 +62,9 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'apply_changes',
-      description: 'Помечает правки как применённые после записи в исходники.',
+      description:
+        'Помечает правки как применённые в буфере (~/.visbug-mcp/changes.json). '
+        + 'Файлы проекта не меняет — их пишет auto-apply после «Стоп» или вы через /visbug-apply.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -95,13 +98,24 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === 'apply_changes') {
     const changes = readStore()
     const ids = args?.ids
+    let marked = 0
     if (!ids || ids.length === 0) {
-      changes.forEach(c => { c.applied = true })
+      changes.forEach(c => {
+        if (!c.applied) {
+          c.applied = true
+          marked++
+        }
+      })
     } else {
-      ids.forEach(i => { if (changes[i]) changes[i].applied = true })
+      ids.forEach(i => {
+        if (changes[i] && !changes[i].applied) {
+          changes[i].applied = true
+          marked++
+        }
+      })
     }
     writeStore(changes)
-    return { content: [{ type: 'text', text: `Помечено как применённое: ${ids?.length ?? changes.length} правок` }] }
+    return { content: [{ type: 'text', text: `Помечено как применённое: ${marked} правок` }] }
   }
 
   if (name === 'clear_changes') {

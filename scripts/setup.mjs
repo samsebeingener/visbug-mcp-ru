@@ -126,7 +126,7 @@ async function main() {
   if (workspace) {
     const cmdDir = join(workspace, '.cursor', 'commands')
     mkdirSync(cmdDir, { recursive: true })
-    for (const name of ['visbug-mcp-update.md', 'visbug-mcp-start.md']) {
+    for (const name of ['visbug-mcp-update.md', 'visbug-mcp-start.md', 'visbug-apply.md']) {
       const src = join(REPO_ROOT, '.cursor', 'commands', name)
       const dest = join(cmdDir, name)
       if (existsSync(src) && !existsSync(dest)) {

@@ -13,8 +13,7 @@ import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-
-const DAEMON_VERSION = '0.6.9'
+import { PACKAGE_VERSION } from './version.js'
 const STORE_DIR = join(homedir(), '.visbug-mcp')
 const STORE_FILE = join(STORE_DIR, 'changes.json')
 const WS_PORT = 4844
@@ -112,6 +111,7 @@ function buildHealthSnapshot(config) {
 loadStore()
 
 function freePort(port) {
+  if (process.platform === 'win32') return
   try {
     const pids = execSync(`lsof -ti :${port} 2>/dev/null || true`).toString().trim()
     if (pids) {
@@ -127,7 +127,7 @@ freePort(WS_PORT)
 const wss = new WebSocketServer({ port: WS_PORT })
 
 wss.on('listening', () => {
-  process.stderr.write(`[ws-daemon] v${DAEMON_VERSION} ws://127.0.0.1:${WS_PORT} spawnCli=${loadConfig().autoAgent?.spawnCli === true}\n`)
+  process.stderr.write(`[ws-daemon] v${PACKAGE_VERSION} ws://127.0.0.1:${WS_PORT} spawnCli=${loadConfig().autoAgent?.spawnCli === true}\n`)
 })
 
 wss.on('error', (err) => {
@@ -250,9 +250,27 @@ wss.on('connection', (ws) => {
               remaining: result.remaining ?? total,
               message: `Не применено: ${result.remaining ?? total}. Cursor → /visbug-apply (терминал не нужен)`,
             })
-          } else if (result.action !== 'disabled') {
-            broadcast({ event: 'auto-agent-skipped', reason: result.reason ?? result.agentReason, total })
+          } else if (result.action === 'disabled') {
+            broadcast({
+              event: 'auto-agent-skipped',
+              reason: 'auto-agent выключен (npm run setup)',
+              total,
+            })
+          } else {
+            broadcast({
+              event: 'auto-agent-skipped',
+              reason: result.reason ?? result.agentReason ?? 'пропущено',
+              total,
+            })
           }
+        }).catch((err) => {
+          process.stderr.write(`[ws-daemon] post-recording: ${err.message}\n`)
+          broadcast({
+            event: 'apply-incomplete',
+            applied: 0,
+            remaining: total,
+            message: `Ошибка auto-apply: ${err.message}. Попробуйте /visbug-apply в Cursor.`,
+          })
         })
       }
 

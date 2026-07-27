@@ -5,11 +5,7 @@ function isDevPageUrl(url) {
   try {
     const { hostname, protocol } = new URL(url)
     if (protocol !== 'http:' && protocol !== 'https:') return false
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]') return true
-    if (hostname.endsWith('.local')) return true
-    if (/^192\.168\.\d+\.\d+$/.test(hostname)) return true
-    if (/^10\.\d+\.\d+\.\d+$/.test(hostname)) return true
-    return false
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
   } catch {
     return false
   }
