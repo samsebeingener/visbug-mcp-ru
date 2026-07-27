@@ -4,7 +4,7 @@
  * Drag: короткие линии между перетаскиваемым и целевым элементом + подпись.
  */
 
-const ALIGNMENT_GUIDES_VERSION = '0.6.0'
+const ALIGNMENT_GUIDES_VERSION = '0.6.1'
 
 if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
   globalThis.VisbugMcpAlignmentGuides?.stop?.()

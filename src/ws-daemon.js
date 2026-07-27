@@ -6,7 +6,7 @@
 import { WebSocketServer } from 'ws'
 import { parseMutationsToChanges, formatChangesFromStore, clearSeen, restoreSeen } from './parser.js'
 import { loadConfig } from './config.js'
-import { maybeSpawnAutoAgent, checkCursorCliAvailable } from './auto-agent.js'
+import { handlePostRecording, checkCursorCliAvailable } from './auto-agent.js'
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { homedir } from 'os'
@@ -200,11 +200,20 @@ wss.on('connection', (ws) => {
         const total = (msg.changes ?? []).filter(c => !c.applied).length
         process.stderr.write(`[ws-daemon] запись: ${msg.changes?.length ?? 0} правок после diff\n`)
         broadcast({ event: 'recording-finished', total })
-        maybeSpawnAutoAgent({ total, url: msg.url }).then((result) => {
-          if (result.spawned) {
-            broadcast({ event: 'auto-agent-started', workspace: result.workspace, total })
-          } else if (result.reason && result.reason !== 'auto-agent disabled') {
-            broadcast({ event: 'auto-agent-skipped', reason: result.reason, total })
+        handlePostRecording({ total, url: msg.url }, store.changes).then((result) => {
+          saveStore()
+          if (result.action === 'auto-applied' || result.action === 'auto-applied-partial') {
+            broadcast({
+              event: 'auto-applied',
+              applied: result.applied,
+              skipped: result.skipped,
+              files: result.files,
+              remaining: result.remaining ?? 0,
+            })
+          } else if (result.spawned) {
+            broadcast({ event: 'auto-agent-started', workspace: result.workspace, total: result.remaining ?? total })
+          } else if (result.action !== 'disabled') {
+            broadcast({ event: 'auto-agent-skipped', reason: result.reason ?? result.agentReason, total })
           }
         })
       }

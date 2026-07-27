@@ -6,6 +6,9 @@ import { spawn } from 'child_process'
 import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { loadConfig, getPromptPath, getStoreDir } from './config.js'
+import { resolveAgentCommand } from './cli-resolver.js'
+import { autoApplyWorkspace } from './auto-apply.js'
+import { ensureAgentCli } from '../scripts/ensure-agent-cli.mjs'
 
 let agentRunning = false
 let lastSpawnAt = 0
@@ -20,8 +23,8 @@ function log(line) {
 }
 
 export function resolveCursorCli(config) {
-  const cmd = config.cursorCli || 'agent'
-  return cmd
+  const resolved = resolveAgentCommand(config)
+  return resolved.ok ? resolved.command : (config.cursorCli || 'agent')
 }
 
 export function readApplyPrompt(config) {
@@ -37,16 +40,58 @@ export function readApplyPrompt(config) {
 }
 
 export function checkCursorCliAvailable(config = loadConfig()) {
-  const cmd = resolveCursorCli(config)
-  return new Promise((resolve) => {
-    const probe = spawn(cmd, ['--version'], { shell: true, stdio: 'ignore' })
-    probe.on('error', () => resolve({ ok: false, command: cmd }))
-    probe.on('close', (code) => resolve({ ok: code === 0, command: cmd }))
-    setTimeout(() => {
-      probe.kill()
-      resolve({ ok: false, command: cmd, timeout: true })
-    }, 5000)
-  })
+  return Promise.resolve(resolveAgentCommand(config))
+}
+
+/**
+ * После «Стоп»: сначала пишем в файлы сами (без CLI), остаток — в headless agent если есть.
+ * @param {{ total?: number, url?: string }} meta
+ * @param {object[]} changes — мутабельный массив правок
+ */
+export async function handlePostRecording(meta = {}, changes = []) {
+  const config = loadConfig()
+  if (!config.autoAgent?.enabled) {
+    return { action: 'disabled', spawned: false, reason: 'auto-agent disabled' }
+  }
+
+  const workspace = config.autoAgent.workspace?.trim()
+  if (!workspace) {
+    log('skip: workspace не задан (npm run setup)')
+    return { action: 'skipped', spawned: false, reason: 'workspace missing' }
+  }
+
+  if (!existsSync(workspace)) {
+    log(`skip: workspace не найден: ${workspace}`)
+    return { action: 'skipped', spawned: false, reason: 'workspace not found' }
+  }
+
+  const applyResult = autoApplyWorkspace(workspace, changes)
+  const remaining = changes.filter((c) => !c.applied).length
+
+  if (applyResult.applied > 0) {
+    log(`auto-apply: ${applyResult.applied} в файлы (${applyResult.files.join(', ') || '—'})`)
+  }
+
+  if (remaining === 0) {
+    return { action: 'auto-applied', spawned: false, ...applyResult, remaining: 0 }
+  }
+
+  const agentResult = await maybeSpawnAutoAgent({ ...meta, total: remaining })
+  if (agentResult.spawned) {
+    return { action: 'agent-spawned', ...applyResult, remaining, ...agentResult }
+  }
+
+  if (applyResult.applied > 0) {
+    return {
+      action: 'auto-applied-partial',
+      spawned: false,
+      ...applyResult,
+      remaining,
+      agentReason: agentResult.reason,
+    }
+  }
+
+  return { action: 'failed', spawned: false, ...applyResult, remaining, reason: agentResult.reason }
 }
 
 /**
@@ -77,9 +122,14 @@ export async function maybeSpawnAutoAgent(meta = {}) {
     return { spawned: false, reason: 'debounced' }
   }
 
-  const cliCheck = await checkCursorCliAvailable(config)
+  let cliCheck = await checkCursorCliAvailable(config)
   if (!cliCheck.ok) {
-    log(`skip: Cursor CLI «${cliCheck.command}» недоступен. Установите CLI и выполните agent login`)
+    log('CLI не найден — пробую автоустановку…')
+    const ensured = await ensureAgentCli({ install: true, quiet: true })
+    cliCheck = ensured.ok ? ensured : await checkCursorCliAvailable(loadConfig())
+  }
+  if (!cliCheck.ok) {
+    log(`skip: Cursor Agent CLI недоступен (${cliCheck.command}). Перезапустите терминал или: npm run ensure-cli`)
     return { spawned: false, reason: 'cli unavailable' }
   }
 

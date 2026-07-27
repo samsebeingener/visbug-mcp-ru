@@ -73,6 +73,12 @@ ws.onmessage = (e) => {
     if (data.event === 'health') {
       renderHealth(data)
     }
+    if (data.event === 'auto-applied') {
+      const files = (data.files ?? []).length ? ` → ${data.files.join(', ')}` : ''
+      statusEl.textContent = data.remaining
+        ? `Применено ${data.applied} в файлы${files}; осталось ${data.remaining}`
+        : `Готово: ${data.applied} правок в файлы${files}`
+    }
     if (data.event === 'auto-agent-started') {
       statusEl.textContent = `Auto-agent запущен (${data.total} правок)`
     }

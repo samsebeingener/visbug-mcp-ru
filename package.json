@@ -1,6 +1,6 @@
 {
   "name": "visbug-mcp-ru",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "type": "module",
   "description": "Локальный MCP-мост VisBug → Cursor: захват DOM-правок на localhost",
   "author": "Nikita Kulikov <https://samsebeingener.ru>",
@@ -15,7 +15,10 @@
     "daemon": "node src/ws-daemon.js",
     "daemon:watch": "node --watch src/ws-daemon.js",
     "setup": "node scripts/setup.mjs",
-    "health": "node scripts/health-check.mjs"
+    "setup:quick": "node scripts/setup.mjs --yes",
+    "ensure-cli": "node scripts/ensure-agent-cli.mjs",
+    "health": "node scripts/health-check.mjs",
+    "postinstall": "node scripts/ensure-agent-cli.mjs || exit 0"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

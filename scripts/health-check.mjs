@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { loadConfig, getConfigPath } from '../src/config.js'
-import { checkCursorCliAvailable } from '../src/auto-agent.js'
+import { resolveAgentCommand } from '../src/cli-resolver.js'
 import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
 const config = loadConfig()
-const cli = await checkCursorCliAvailable(config)
+const cli = resolveAgentCommand(config)
 const mcpPath = join(homedir(), '.cursor', 'mcp.json')
 let mcpOk = false
 try {
