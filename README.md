@@ -54,7 +54,9 @@ npm install
 npm run setup
 ```
 
-`npm run setup` — интерактивно: путь к проекту сайта, MCP в Cursor, демон, опционально **auto-agent** (после «Стоп» Cursor CLI применяет правки сам).
+`npm run setup` — путь к проекту сайта, MCP в Cursor, демон, **auto-apply** после «Стоп».
+
+**Cursor Agent CLI** (опционально, для сложных правок): `npm run ensure-cli` → `agent login`. На Windows ставится в `%LOCALAPPDATA%\cursor-agent\agent.cmd`.
 
 ### 1. Зависимости (ручной путь)
 
@@ -109,30 +111,39 @@ pm2 save
 
 ## Как пользоваться
 
-### Режим «Запись» (по умолчанию, v0.2)
+### Режим «Запись» (v0.6.2+)
 
 1. `npm run dev` → откройте сайт на `http://localhost:…` в Chrome
-2. В popup расширения: **Начать запись**
-3. Внесите правки в VisBug (цвета, отступы, классы…)
-4. **Стоп — завершить запись** → в буфер попадёт только diff «до/после» (без потока мутаций от скролла)
-5. **Скопировать правки** или в Cursor вызовите MCP `get_changes` → `apply_changes`
+2. Popup: **зелёная точка** (демон online) → **Начать запись**
+3. Правки в VisBug (стили, текст, layout)
+4. **Стоп — завершить запись**
 
-Совет: перед записью кликните по нужной секции (`#osnova`, rail карточек) — snapshot возьмёт scope от неё.
+**После «Стоп» команды в чате не нужны:**
 
-### Рабочий процесс (legacy live observer — выключен)
+1. **auto-apply** — демон сам пишет простые правки в файлы проекта (CSS, текст в `.tsx`)
+2. **fallback LLM** — если что-то не применилось и установлен `agent`, headless Cursor CLI добивает остаток
 
-1. Запустите dev-сервер (`npm run dev`) и откройте сайт на `http://localhost:…` в Chrome — content-script подключится к демону автоматически
-2. Вносите правки в VisBug (цвета, отступы, типографика…)
-3. В Cursor вызовите MCP `get_changes` или нажмите **«Скопировать правки»** в popup расширения
-4. Попросите агента применить изменения в CSS → затем `apply_changes`
+Логи: `~/.visbug-mcp/auto-apply.log`, `~/.visbug-mcp/agent-runs.log`
+
+**Важно:** жмите **Стоп** до закрытия VisBug.
+
+### Запасной путь (ручной)
+
+- **Скопировать правки** в popup или MCP `get_changes` → `apply_changes` в Cursor
+- Команда `/visbug-apply` в проекте с `.cursor/commands/`
+
+Совет: перед записью кликните по нужной секции (`#podhod`, `#avtor`) — snapshot возьмёт scope от неё.
 
 ### Popup Chrome
 
 | Индикатор | Значение |
 |---|---|
-| 🟢 Подключено к MCP-серверу | Демон онлайн, захват активен |
-| 🔴 MCP-сервер не запущен | Демон остановлен — перезапустите скрипт или `pm2 start` |
-| `N правок в буфере` | Неприменённых изменений в очереди |
+| 🟢 Подключено к MCP-серверу | Демон онлайн |
+| 🔴 MCP-сервер не запущен | Перезапустите `start-ws-daemon.ps1` |
+| ✓ Запись в файлы после Стоп | auto-apply включён, workspace задан |
+| ○ CLI agent — не нужен | Норма: CSS уже пишется без CLI |
+| ✓ CLI agent (доп.) | Fallback LLM для сложных правок |
+| `N правок в буфере` | Неприменённых изменений |
 
 | Кнопка | Действие |
 |---|---|
@@ -223,6 +234,13 @@ pm2 save
 ## Полезные команды
 
 ```bash
+# Проверка установки
+npm run health
+
+# Cursor Agent CLI (fallback LLM)
+npm run ensure-cli
+agent login
+
 # Статус демона (pm2)
 pm2 status visbug-ws
 
@@ -251,6 +269,9 @@ visbug-mcp-ru/
 ├── src/
 │   ├── ws-daemon.js         # WebSocket-демон (фон)
 │   ├── server.js            # MCP stdio (Cursor)
+│   ├── auto-apply.js        # запись правок в файлы без LLM
+│   ├── auto-agent.js        # fallback: headless agent после auto-apply
+│   ├── cli-resolver.js      # поиск agent / agent.cmd (Windows)
 │   └── parser.js            # парсинг, дедупликация, формат
 ├── extension/
 │   ├── manifest.json        # Chrome Manifest v3
@@ -259,7 +280,10 @@ visbug-mcp-ru/
 │   ├── popup.js
 │   └── background.js
 ├── scripts/
-│   └── start-ws-daemon.ps1  # запуск демона на Windows
+│   ├── setup.mjs            # npm run setup
+│   ├── ensure-agent-cli.mjs # npm run ensure-cli
+│   ├── health-check.mjs     # npm run health
+│   └── start-ws-daemon.ps1  # демон на Windows
 ├── README.md                # этот файл
 ├── README.ru.md             # краткая версия
 └── FORK.ru.md               # заметки о форке

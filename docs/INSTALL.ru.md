@@ -1,8 +1,9 @@
 # Установка VisBug MCP Bridge (полный стек)
 
-Репозиторий: https://github.com/samsebeingener/visbug-mcp-ru
+Репозиторий: https://github.com/samsebeingener/visbug-mcp-ru  
+Версия: **0.6.2+**
 
-В Cursor откройте этот репо или выполните команду **`/visbug-mcp-start`** — агент проведёт по шагам.
+В Cursor: **`/visbug-mcp-start`** — краткая шпаргалка.
 
 ## Быстрый старт
 
@@ -13,25 +14,26 @@ npm install
 npm run setup
 ```
 
-`npm run setup` спросит:
-- путь к **вашему проекту сайта** (workspace для auto-agent);
-- включить ли **auto-agent** (после «Стоп» в popup Cursor CLI применяет правки сам).
+`npm run setup` спросит путь к **проекту сайта** (workspace) и включит **auto-apply** после «Стоп».
 
 ## Что установить вручную
 
 1. **VisBug** — [Chrome Web Store](https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc)
-2. **Расширение visbug-mcp** — `chrome://extensions` → распакованное → папка `extension/` этого репо
-3. **Cursor CLI** — для auto-agent: [cursor.com/docs/cli](https://cursor.com/docs/cli/overview) → `agent login`
-4. **Reload Window** в Cursor после setup
+2. **Расширение visbug-mcp** — `chrome://extensions` → распакованное → папка `extension/`
+3. **Reload Window** в Cursor после setup
 
-## Команда в проекте сайта
+## Cursor Agent CLI (опционально, fallback LLM)
 
-Скопируйте в корень **вашего** фронтенд-проекта:
+Нужен только если auto-apply не смог применить часть правок (сложный текст, нестандартные селекторы).
 
+```bash
+npm run ensure-cli
+agent login
+agent status
 ```
-visbug-mcp-ru/.cursor/commands/visbug-mcp-start.md
-  → your-site/.cursor/commands/visbug-mcp-start.md
-```
+
+Windows: `%LOCALAPPDATA%\cursor-agent\agent.cmd`  
+Проверка: `npm run health` → `cursor cli: OK`
 
 ## Проверка
 
@@ -41,13 +43,33 @@ npm run health
 
 Popup: зелёная точка = демон online.
 
-## Auto-agent
+## Как работает после «Стоп»
+
+```
+Запись VisBug → Стоп
+       ↓
+  auto-apply (без LLM) → CSS/текст в файлы workspace
+       ↓
+  остались правки? → да → headless `agent -p` (если CLI установлен)
+       ↓
+  нет CLI → часть правок остаётся в буфере (popup / get_changes)
+```
 
 Конфиг: `~/.visbug-mcp/config.json`  
-Лог: `~/.visbug-mcp/agent-runs.log`
-
-После «Стоп» в записи headless `agent` читает `get_changes` и правит файлы в workspace.
+Логи: `~/.visbug-mcp/auto-apply.log`, `~/.visbug-mcp/agent-runs.log`
 
 ## Ежедневно
 
-dev-сервер → VisBug → popup **Начать запись** → правки → **Стоп** → (auto) или `get_changes` в Cursor.
+`npm run dev` → VisBug → popup **Начать запись** → правки → **Стоп** → смотри diff в редакторе.
+
+Команды в чате Cursor **не обязательны**.
+
+## Диагностика
+
+| Симптом | Решение |
+|---------|---------|
+| Красная точка | `scripts/start-ws-daemon.ps1` |
+| Нет правок | F5 → снова Запись → Стоп |
+| ○ CLI agent — не нужен | Норма, если CSS применился |
+| Сложные правки не в файлах | `npm run ensure-cli`, `agent login` |
+| MCP не видит tools | Reload Window |
