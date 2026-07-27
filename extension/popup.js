@@ -5,6 +5,7 @@ const statusEl = document.getElementById('status')
 const count = document.getElementById('count')
 const hint = document.getElementById('hint')
 const healthEl = document.getElementById('health')
+const installHintEl = document.getElementById('install-hint')
 const recordBtn = document.getElementById('record-btn')
 const clearBtn = document.getElementById('clear-btn')
 const copyBtn = document.getElementById('copy-btn')
@@ -26,12 +27,31 @@ function setRecording(active) {
     : '1. Начать запись → 2. Правки в VisBug → 3. Стоп → в файлы проекта'
 }
 
+function renderInstallHint(h) {
+  if (!installHintEl) return
+  const store = h?.visbugStoreUrl
+    || 'https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc'
+  const extPage = h?.chromeExtensionsUrl || 'chrome://extensions'
+  const folder = h?.extensionPath || ''
+  installHintEl.innerHTML = [
+    '<strong>Chrome (один раз)</strong><br>',
+    `1. VisBug: <a href="${store}" target="_blank" rel="noopener">Chrome Web Store</a><br>`,
+    `2. Откройте в адресной строке: <code>${extPage}</code><br>`,
+    '3. Режим разработчика → «Загрузить распакованное»<br>',
+    folder
+      ? `4. Папка расширения visbug-mcp:<br><code>${folder}</code>`
+      : '4. Папка: <code>&lt;репо&gt;/extension</code> (путь печатает npm run setup)',
+  ].join('')
+}
+
 function renderHealth(h) {
   if (!healthEl) return
   if (!h) {
     healthEl.textContent = 'Демон offline — npm run setup или start-ws-daemon.ps1'
+    renderInstallHint(null)
     return
   }
+  renderInstallHint(h)
   const line = (ok, label, neutral = false) => {
     const cls = ok ? 'ok' : (neutral ? 'opt' : 'bad')
     const mark = ok ? '✓' : (neutral ? '○' : '✗')

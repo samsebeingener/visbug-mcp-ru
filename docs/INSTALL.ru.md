@@ -18,8 +18,18 @@ npm run setup
 
 ## Что установить вручную
 
-1. **VisBug** — [Chrome Web Store](https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc)
-2. **Расширение visbug-mcp** — `chrome://extensions` → распакованное → папка `extension/`
+1. **VisBug** — https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc
+2. **Расширение visbug-mcp**
+   - В Chrome в адресной строке: `chrome://extensions`
+   - Режим разработчика → **Загрузить распакованное**
+   - Папка (полный путь после `npm run setup`):
+
+     ```
+     <путь-к-репо>/visbug-mcp-ru/extension
+     ```
+
+     Пример: `C:\Users\you\projects\visbug-mcp-ru\extension`  
+     Тот же путь виден в **popup** visbug-mcp после setup.
 3. **Reload Window** в Cursor после setup
 
 ## Cursor Agent CLI (опционально, fallback LLM)

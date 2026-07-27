@@ -132,10 +132,14 @@ async function main() {
   }
 
   console.log('--- Осталось вручную (один раз) ---\n')
-  console.log('1. VisBug — Chrome Web Store:')
+  const extensionDir = join(REPO_ROOT, 'extension')
+  console.log('1. VisBug — установить из Chrome Web Store:')
   console.log('   https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc\n')
-  console.log('2. Расширение visbug-mcp — chrome://extensions →')
-  console.log(`   «Загрузить распакованное» → ${join(REPO_ROOT, 'extension')}\n`)
+  console.log('2. Расширение visbug-mcp — в адресной строке Chrome откройте:')
+  console.log('   chrome://extensions')
+  console.log('   Режим разработчика → «Загрузить распакованное» → выберите папку:')
+  console.log(`   ${extensionDir}\n`)
+  console.log('   (скопируйте путь выше — не ищите по диску)\n')
   console.log('3. Cursor → Reload Window\n')
 
   if (config.autoAgent.enabled) {

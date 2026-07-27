@@ -98,6 +98,10 @@ function buildHealthSnapshot(config) {
     workspace: config.autoAgent?.workspace || '',
     mcpConfigured: mcpOk,
     repoRoot: config.repoRoot || '',
+    extensionPath: config.repoRoot ? join(config.repoRoot, 'extension') : '',
+    visbugStoreUrl:
+      'https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc',
+    chromeExtensionsUrl: 'chrome://extensions',
   }
 }
 

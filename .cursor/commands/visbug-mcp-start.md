@@ -1,5 +1,5 @@
 ---
-description: VisBug MCP — шпаргалка и диагностика (v0.6.2)
+description: VisBug MCP — шпаргалка и диагностика (v0.6.3)
 ---
 
 # VisBug MCP — для пользователя
@@ -31,6 +31,12 @@ VisBug в Chrome → правишь сайт визуально → **Стоп**
 | Сложные правки не в файлах | `npm run ensure-cli` → `agent login` |
 | MCP не видит tools | Cursor → Reload Window |
 
+## Chrome (один раз)
+
+- **VisBug:** https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc
+- **Страница расширений:** вставь в адресную строку Chrome `chrome://extensions`
+- **Папка visbug-mcp:** `projects/visbug-mcp-ru/extension` (полный путь — в выводе `npm run setup` или в popup visbug-mcp)
+
 Полный сброс: `cd projects/visbug-mcp-ru && npm run setup`
 
 ---
@@ -46,4 +52,4 @@ VisBug в Chrome → правишь сайт визуально → **Стоп**
 
 **Не предлагай** `get_changes` как основной путь. CLI предлагай только если auto-apply не справился или пользователь просит fallback.
 
-По запросу: проверь `npm run health`, перезапусти демон, версию расширения **0.6.2+**.
+По запросу: проверь `npm run health`, перезапусти демон, версию расширения **0.6.3+**.
