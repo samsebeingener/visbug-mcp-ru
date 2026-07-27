@@ -7,7 +7,7 @@
 
 import { createInterface } from 'readline'
 import { spawn, spawnSync } from 'child_process'
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
@@ -122,6 +122,18 @@ async function main() {
 
   mergeMcpConfig()
   startDaemon()
+
+  if (workspace) {
+    const cmdDir = join(workspace, '.cursor', 'commands')
+    mkdirSync(cmdDir, { recursive: true })
+    for (const name of ['visbug-mcp-update.md', 'visbug-mcp-start.md']) {
+      const src = join(REPO_ROOT, '.cursor', 'commands', name)
+      const dest = join(cmdDir, name)
+      if (existsSync(src) && !existsSync(dest)) {
+        copyFileSync(src, dest)
+      }
+    }
+  }
 
   console.log('\n--- Cursor Agent CLI (для «Стоп» без команд) ---\n')
   const cli = await ensureAgentCli({ install: true, quiet: false })

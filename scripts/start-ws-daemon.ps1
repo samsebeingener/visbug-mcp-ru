@@ -17,4 +17,4 @@ foreach ($c in $conns) {
 
 $node = (Get-Command node -ErrorAction Stop).Source
 Start-Process -FilePath $node -ArgumentList "src/ws-daemon.js" -WorkingDirectory $Root -WindowStyle Hidden
-Write-Host "visbug-ws v0.6.7 restarted (spawnCli off = no terminal). Reload extension."
+Write-Host "visbug-ws v0.6.9 restarted (spawnCli off = no terminal). Reload extension."

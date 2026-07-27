@@ -8,12 +8,13 @@ import { parseMutationsToChanges, formatChangesFromStore, clearSeen, restoreSeen
 import { loadConfig } from './config.js'
 import { handlePostRecording } from './auto-agent.js'
 import { getCliHealthForUi } from './cli-resolver.js'
+import { checkForUpdatesIfDue } from './update-check.js'
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
-const DAEMON_VERSION = '0.6.7'
+const DAEMON_VERSION = '0.6.9'
 const STORE_DIR = join(homedir(), '.visbug-mcp')
 const STORE_FILE = join(STORE_DIR, 'changes.json')
 const WS_PORT = 4844
@@ -183,6 +184,18 @@ wss.on('connection', (ws) => {
         clearStopWatchdog()
         recordingActive = true
         ws.send(JSON.stringify({ event: 'recording-armed' }))
+        const config = loadConfig()
+        checkForUpdatesIfDue(config).then((u) => {
+          if (u.notify && u.updateAvailable) {
+            ws.send(JSON.stringify({
+              event: 'update-available',
+              current: u.current,
+              latest: u.latest,
+              changelog: u.changelog ?? '',
+              message: `Доступно обновление ${u.current} → ${u.latest}. В Cursor: /visbug-mcp-update`,
+            }))
+          }
+        }).catch(() => {})
       }
 
       if (msg.event === 'popup-recording-stop') {

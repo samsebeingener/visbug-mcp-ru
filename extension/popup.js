@@ -4,6 +4,7 @@ const dot = document.getElementById('dot')
 const statusEl = document.getElementById('status')
 const count = document.getElementById('count')
 const hint = document.getElementById('hint')
+const updateBanner = document.getElementById('update-banner')
 const healthEl = document.getElementById('health')
 const installHintEl = document.getElementById('install-hint')
 const recordBtn = document.getElementById('record-btn')
@@ -25,6 +26,25 @@ function setRecording(active) {
   hint.classList.toggle('show', active)
   if (active) {
     hint.textContent = 'REC на странице. Стили и текст. Жмите Стоп — правки уйдут в файлы.'
+  }
+}
+
+function showUpdateBanner(data) {
+  if (!updateBanner || !data?.latest) return
+  const changelog = String(data.changelog ?? '').trim()
+  const shortLog = changelog.length > 280 ? `${changelog.slice(0, 277)}…` : changelog
+  updateBanner.innerHTML = [
+    `<strong>Обновление ${data.current} → ${data.latest}</strong>`,
+    shortLog ? `<br>${shortLog.replace(/\n/g, '<br>')}` : '',
+    '<br><br>В Cursor: <strong>/visbug-mcp-update</strong>',
+  ].join('')
+  updateBanner.classList.add('show')
+}
+
+function hideUpdateBanner() {
+  if (updateBanner) {
+    updateBanner.classList.remove('show')
+    updateBanner.textContent = ''
   }
 }
 
@@ -102,6 +122,10 @@ ws.onopen = () => {
 ws.onmessage = (e) => {
   try {
     const data = JSON.parse(e.data)
+    if (data.event === 'update-available') {
+      showUpdateBanner(data)
+      if (data.message) statusEl.textContent = data.message
+    }
     if (data.event === 'stats') {
       count.textContent = `В буфере правок: ${data.total}`
       cachedChangesText = data.changesText ?? ''

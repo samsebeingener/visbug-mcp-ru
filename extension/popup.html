@@ -59,6 +59,21 @@
       line-height: 1.45;
     }
     #hint.show { display: block; }
+    #update-banner {
+      display: none;
+      font-size: 11px;
+      color: #fde68a;
+      margin: 0 0 10px;
+      padding: 8px 10px;
+      background: #1c1910;
+      border: 1px solid #b45309;
+      border-radius: 6px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #update-banner.show { display: block; }
+    #update-banner strong { color: #fbbf24; }
     #health {
       font-size: 11px;
       padding: 8px 10px;
@@ -130,6 +145,7 @@
     <span id="status">Подключение…</span>
   </div>
   <p id="hint"></p>
+  <div id="update-banner" role="status"></div>
   <p id="count">В буфере правок: 0</p>
 
   <div class="actions">

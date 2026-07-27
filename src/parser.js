@@ -116,7 +116,7 @@ export const AUTO_APPLY_SAFE_PROPERTIES = new Set([
   'letter-spacing',
 ])
 
-const AUTO_APPLY_BLOCKED_SELECTOR_RE =
+export const AUTO_APPLY_BLOCKED_SELECTOR_RE =
   /editorial-card-glow|pointer-events-none|vibe-annotations|visbug-mcp-guides/i
 
 const VISBUG_SECTION_IDS = new Set([
