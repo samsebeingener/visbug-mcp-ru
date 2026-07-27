@@ -1,9 +1,18 @@
 /**
- * Snapshot до/после — diff DOM-состояния для режима «Запись».
- * Без фильтров шума: в буфер попадает всё, что реально изменилось в inline-стилях.
+ * Snapshot до/после — diff DOM (Node, тесты / ws-daemon).
+ * Логика синхронизирована с extension/snapshot.js
  */
 
 const MAX_ELEMENTS = 1200
+const MAX_TEXT_LENGTH = 4000
+
+const TEXT_ELEMENT_TAGS = new Set([
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'p', 'span', 'a', 'li', 'label', 'button',
+  'td', 'th', 'figcaption', 'blockquote',
+  'dt', 'dd', 'caption', 'legend', 'summary',
+  'small', 'strong', 'em', 'b', 'i', 'cite', 'q', 'mark', 'time', 'abbr',
+])
 
 function parseInlineStyle(styleAttr) {
   const map = {}
@@ -25,19 +34,49 @@ function captureElementStyles(el) {
 
 function shouldSkipElement(el) {
   const tag = el.tagName?.toLowerCase()
-  if (!tag || tag === 'script' || tag === 'style' || tag === 'noscript') return true
+  if (!tag || tag === 'script' || tag === 'style' || tag === 'noscript' || tag === 'svg') return true
   if (tag.startsWith('vis-') || tag === 'vis-bug' || tag.startsWith('eye-')) return true
-  if (el.closest?.('vis-bug')) return true
+  if (el.closest?.('vis-bug, #visbug-mcp-guides-root, #visbug-mcp-recording-badge')) return true
   return false
 }
 
-function getDirectText(el) {
-  let text = ''
-  for (const node of el.childNodes) {
-    if (node.nodeType === Node.TEXT_NODE) text += node.textContent ?? ''
+function normalizeText(text) {
+  return (text || '').replace(/\s+/g, ' ').trim()
+}
+
+function hasNestedTextElement(el) {
+  for (const child of el.children) {
+    if (shouldSkipElement(child)) continue
+    if (TEXT_ELEMENT_TAGS.has(child.tagName.toLowerCase())) {
+      if (normalizeText(child.textContent)) return true
+    }
+    if (hasNestedTextElement(child)) return true
   }
-  text = text.trim()
-  if (!text || text.length > 150) return null
+  return false
+}
+
+function captureElementText(el) {
+  if (shouldSkipElement(el)) return null
+
+  const tag = el.tagName.toLowerCase()
+  const isContentEditable = el.isContentEditable
+    || el.getAttribute('contenteditable') === 'true'
+    || el.getAttribute('contenteditable') === ''
+
+  if (isContentEditable) {
+    const text = normalizeText(el.innerText || el.textContent)
+    if (!text || text.length > MAX_TEXT_LENGTH) return null
+    return text
+  }
+
+  const isTextTag = TEXT_ELEMENT_TAGS.has(tag)
+  const isLeafTextHost = el.children.length === 0
+
+  if (!isTextTag && !isLeafTextHost) return null
+  if (isTextTag && hasNestedTextElement(el)) return null
+
+  const text = normalizeText(el.textContent)
+  if (!text || text.length > MAX_TEXT_LENGTH) return null
   return text
 }
 
@@ -56,15 +95,30 @@ export function captureSnapshot(rootEl, getSelector) {
       tag: el.tagName.toLowerCase(),
       styles: captureElementStyles(el),
       className: el.getAttribute('class') ?? '',
-      text: getDirectText(el),
+      text: captureElementText(el),
     })
   }
 
   return entries
 }
 
+function dedupeNestedTextChanges(changes) {
+  const text = changes.filter((c) => c.type === 'text')
+  const rest = changes.filter((c) => c.type !== 'text')
+  const kept = []
+
+  for (const change of text.sort((a, b) => b.selector.length - a.selector.length)) {
+    const hasMoreSpecific = kept.some(
+      (k) => k.selector.startsWith(`${change.selector} >`) || k.selector.startsWith(`${change.selector}>`),
+    )
+    if (!hasMoreSpecific) kept.push(change)
+  }
+
+  return [...rest, ...kept]
+}
+
 export function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now() } = {}) {
-  const beforeMap = new Map(beforeEntries.map(e => [e.selector, e]))
+  const beforeMap = new Map(beforeEntries.map((e) => [e.selector, e]))
   const changes = []
 
   for (const after of afterEntries) {
@@ -104,21 +158,25 @@ export function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Da
       })
     }
 
-    if (before.text !== after.text && before.text !== null && after.text !== null && before.text !== after.text) {
-      changes.push({
-        type: 'text',
-        selector: after.selector,
-        oldValue: before.text,
-        newValue: after.text,
-        tag: after.tag,
-        url,
-        timestamp,
-        applied: false,
-      })
+    if (before.text !== after.text) {
+      const oldValue = before.text ?? null
+      const newValue = after.text ?? null
+      if (oldValue !== newValue) {
+        changes.push({
+          type: 'text',
+          selector: after.selector,
+          oldValue,
+          newValue,
+          tag: after.tag,
+          url,
+          timestamp,
+          applied: false,
+        })
+      }
     }
   }
 
-  return changes
+  return dedupeNestedTextChanges(changes)
 }
 
 export function getDefaultSnapshotRoot(documentRef = globalThis.document) {

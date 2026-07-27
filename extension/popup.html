@@ -38,7 +38,10 @@
     .dot.rec { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; animation: pulse 1.2s infinite; }
     @keyframes pulse { 50% { opacity: 0.5; } }
     #status { font-size: 13px; font-weight: 600; vertical-align: middle; }
-    #hint, #count { font-size: 12px; color: #888; margin: 8px 0 12px; line-height: 1.45; }
+    #hint, #count, #health { font-size: 12px; color: #888; margin: 8px 0 12px; line-height: 1.45; }
+    #health { font-size: 11px; padding: 8px 10px; background: #14141f; border-radius: 6px; border: 1px solid #2a2a3a; }
+    #health .ok { color: #22c55e; }
+    #health .bad { color: #f87171; }
     button {
       display: block;
       margin-top: 10px;
@@ -84,6 +87,7 @@
   </div>
   <p id="hint">При записи на странице — бейдж REC. В покое сетка колонок; при drag — тонкие красные линии и подпись расстояния.</p>
   <p id="count"></p>
+  <div id="health">Проверка…</div>
   <button id="record-btn" disabled>Начать запись</button>
   <button id="copy-btn" disabled>Скопировать правки</button>
   <button id="clear-btn" disabled>Очистить правки</button>

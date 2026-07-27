@@ -3,7 +3,7 @@
 - **Upstream:** https://github.com/mambari/visbug-mcp
 - **Origin:** https://github.com/samsebeingener/visbug-mcp-ru
 - **Локальный путь:** `C:\Users\nkoul\OneDrive\Документы\Cursor\projects\visbug-mcp-ru`
-- **Версия:** 0.5.0 (релиз 1–5: запись, направляющие, REC, MCP-группировка, apply-подсказки)
+- **Версия:** 0.6.0 (auto-agent, npm run setup, /visbug-mcp-start)
 - **Язык:** русский UI (popup, MCP, формат diff), фильтры шума VisBug
 
 ## Возможности (0.5.0)
@@ -24,6 +24,7 @@
 | 0.3.1 | Полностраничный snapshot, надёжный stop/start, меньше шума |
 | 0.4.0 | Figma-like направляющие при записи |
 | 0.4.x | Тонкие красные линии при выравнивании, подписи gap, доработка сетки |
+| **0.5.2** | Захват текста: h1–h6, p, span, a, contenteditable; text-watch только при записи; подсказки apply для текста |
 | **0.5.0** | REC-бейдж на странице, bundle направляющих + parser (секции + apply hints), версии extension/npm 0.5.0 |
 
 ## Работа с репозиторием

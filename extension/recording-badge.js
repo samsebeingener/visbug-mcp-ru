@@ -2,7 +2,7 @@
  * Fixed "REC" badge while VisBug recording is active.
  */
 
-const RECORDING_BADGE_VERSION = '0.5.0'
+const RECORDING_BADGE_VERSION = '0.6.0'
 
 if (globalThis.VisbugMcpRecordingBadge?.version !== RECORDING_BADGE_VERSION) {
   globalThis.VisbugMcpRecordingBadge?.stop?.()

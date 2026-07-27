@@ -4,6 +4,7 @@ const dot = document.getElementById('dot')
 const statusEl = document.getElementById('status')
 const count = document.getElementById('count')
 const hint = document.getElementById('hint')
+const healthEl = document.getElementById('health')
 const recordBtn = document.getElementById('record-btn')
 const clearBtn = document.getElementById('clear-btn')
 const copyBtn = document.getElementById('copy-btn')
@@ -21,12 +22,35 @@ function setRecording(active) {
     ? 'Идёт запись… правьте в VisBug'
     : (connected ? 'Подключено к MCP-серверу' : 'MCP-сервер не запущен')
   hint.textContent = active
-    ? 'На странице — бейдж REC. Сетка колонок + при drag тонкие красные линии к соседу с подписью расстояния. Стоп — в буфер.'
-    : '1. Начать запись (появится REC на странице) → 2. Правки в VisBug → 3. Стоп → 4. MCP: секции ##id + подсказки apply'
+    ? 'REC на странице. Пишутся стили и текст (заголовки, p, span). Стоп — в буфер MCP.'
+    : '1. Начать запись → 2. Правки в VisBug (в т.ч. текст) → 3. Стоп → 4. MCP / Скопировать'
+}
+
+function renderHealth(h) {
+  if (!healthEl) return
+  if (!h) {
+    healthEl.textContent = 'Демон offline — npm run setup или start-ws-daemon.ps1'
+    return
+  }
+  const line = (ok, label) => `<span class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'}</span> ${label}`
+  const ws = h.workspace ? (h.workspace.length > 28 ? `…${h.workspace.slice(-26)}` : h.workspace) : 'не задан'
+  healthEl.innerHTML = [
+    line(true, 'Демон'),
+    line(h.mcpConfigured, 'MCP в Cursor'),
+    line(h.cursorCli, `CLI ${h.cursorCliCommand || 'agent'}`),
+    line(h.autoAgentEnabled, `Auto-agent → ${ws}`),
+  ].join('<br>')
+}
+
+function refreshHealth() {
+  if (connected) ws.send(JSON.stringify({ event: 'popup-health' }))
 }
 
 function refreshStats() {
-  if (connected) ws.send(JSON.stringify({ event: 'popup-ping' }))
+  if (connected) {
+    ws.send(JSON.stringify({ event: 'popup-ping' }))
+    refreshHealth()
+  }
 }
 
 ws.onopen = () => {
@@ -44,6 +68,16 @@ ws.onmessage = (e) => {
       count.textContent = `В буфере правок: ${data.total}`
       cachedChangesText = data.changesText ?? ''
       if (typeof data.recording === 'boolean') setRecording(data.recording)
+      if (data.health) renderHealth({ ...data.health, cursorCli: data.health.cursorCli })
+    }
+    if (data.event === 'health') {
+      renderHealth(data)
+    }
+    if (data.event === 'auto-agent-started') {
+      statusEl.textContent = `Auto-agent запущен (${data.total} правок)`
+    }
+    if (data.event === 'auto-agent-skipped') {
+      statusEl.textContent = `Запись OK; auto-agent: ${data.reason}`
     }
     if (data.event === 'recording-armed') {
       setRecording(true)
@@ -69,7 +103,8 @@ ws.onerror = ws.onclose = () => {
   setRecording(false)
   dot.className = 'dot off'
   statusEl.textContent = 'MCP-сервер не запущен'
-  count.textContent = 'Запустите: powershell -File scripts/start-ws-daemon.ps1'
+  count.textContent = 'Запустите: npm run setup'
+  renderHealth(null)
   recordBtn.disabled = true
   clearBtn.disabled = true
   copyBtn.disabled = true

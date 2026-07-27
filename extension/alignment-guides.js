@@ -4,7 +4,7 @@
  * Drag: короткие линии между перетаскиваемым и целевым элементом + подпись.
  */
 
-const ALIGNMENT_GUIDES_VERSION = '0.5.0'
+const ALIGNMENT_GUIDES_VERSION = '0.6.0'
 
 if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
   globalThis.VisbugMcpAlignmentGuides?.stop?.()
@@ -164,6 +164,7 @@ if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
     dragIdleFrames: 0,
     candidates: [],
     observer: null,
+    drawnNearLabelKeys: null,
 
     onScroll: null,
     onResize: null,
@@ -234,27 +235,35 @@ if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
       }
     },
 
-    drawMatchLabel(text, x, y, { fill = COLOR_ACTIVE, anchor = 'start' } = {}) {
-      const charW = 5.6
-      const pad = 4
+    drawMatchLabel(text, x, y, { variant = 'active', anchor = 'start' } = {}) {
+      const charW = 6
+      const pad = 5
       const badgeW = text.length * charW + pad * 2
-      const badgeH = 16
+      const badgeH = 18
       let rectX = x
       if (anchor === 'middle') rectX = x - badgeW / 2
+
+      const badgeFill = variant === 'active'
+        ? 'rgba(220, 38, 38, 0.94)'
+        : 'rgba(15, 23, 42, 0.92)'
+
       this.svg.appendChild(svgEl('rect', {
         x: rectX,
         y: y - badgeH / 2,
         width: badgeW,
         height: badgeH,
-        fill: 'rgba(15, 23, 42, 0.82)',
-        rx: 3,
+        fill: badgeFill,
+        stroke: variant === 'active' ? '#fecaca' : 'rgba(248, 250, 252, 0.35)',
+        'stroke-width': 0.75,
+        rx: 4,
       }))
       const textAttrs = {
         x: anchor === 'middle' ? x : x + pad,
         y: y + 1,
-        fill,
-        'font-size': 10,
-        'font-family': 'system-ui, sans-serif',
+        fill: '#ffffff',
+        'font-size': 11,
+        'font-weight': 600,
+        'font-family': 'system-ui, -apple-system, sans-serif',
         'dominant-baseline': 'middle',
       }
       if (anchor === 'middle') textAttrs['text-anchor'] = 'middle'
@@ -284,9 +293,10 @@ if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
         const midY = (Math.max(dragRect.top, otherRect.top) + Math.min(dragRect.bottom, otherRect.bottom)) / 2
         if (snapped) {
           const text = `${label} · ${edgeLabel(refKind)} · ${gapLabel}`
-          this.drawMatchLabel(text, position + 6, midY)
-        } else {
-          this.drawMatchLabel(gapLabel, position + 6, midY, { fill: COLOR_NEAR })
+          this.drawMatchLabel(text, position + 6, midY, { variant: 'active' })
+        } else if (!this.drawnNearLabelKeys?.has(`x:${Math.round(position)}`)) {
+          this.drawnNearLabelKeys?.add(`x:${Math.round(position)}`)
+          this.drawMatchLabel(gapLabel, position + 6, midY, { variant: 'near' })
         }
       } else {
         const x1 = Math.min(dragRect.left, otherRect.left) - 4
@@ -304,9 +314,10 @@ if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
         const midX = (Math.max(dragRect.left, otherRect.left) + Math.min(dragRect.right, otherRect.right)) / 2
         if (snapped) {
           const text = `${label} · ${edgeLabel(refKind)} · ${gapLabel}`
-          this.drawMatchLabel(text, midX, position - 10, { anchor: 'middle' })
-        } else {
-          this.drawMatchLabel(gapLabel, midX, position - 10, { fill: COLOR_NEAR, anchor: 'middle' })
+          this.drawMatchLabel(text, midX, position - 10, { variant: 'active', anchor: 'middle' })
+        } else if (!this.drawnNearLabelKeys?.has(`y:${Math.round(position)}`)) {
+          this.drawnNearLabelKeys?.add(`y:${Math.round(position)}`)
+          this.drawMatchLabel(gapLabel, midX, position - 10, { variant: 'near', anchor: 'middle' })
         }
       }
 
@@ -341,6 +352,7 @@ if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
 
       const h = window.innerHeight
       this.svg.innerHTML = ''
+      this.drawnNearLabelKeys = new Set()
 
       this.drawColumnGrid(h)
 

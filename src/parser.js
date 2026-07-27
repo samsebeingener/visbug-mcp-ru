@@ -131,6 +131,16 @@ export function isVisbugArtifactProperty(property) {
  */
 export function getApplyHints(change) {
   const hints = []
+  const selector = change.selector ?? ''
+
+  if (change.type === 'text') {
+    hints.push('💡 текст: править в компоненте/разметке (.tsx, .astro), не в CSS')
+    if (/service-cell|service-title|service-desc|hero-copy|monochrom/i.test(selector)) {
+      hints.push('💡 искать в frontend-new/src/components или page-content')
+    }
+    return hints
+  }
+
   if (change.type !== 'style' || !change.property) return hints
 
   if (isVisbugArtifactProperty(change.property)) {
@@ -139,7 +149,6 @@ export function getApplyHints(change) {
   }
 
   const prop = change.property
-  const selector = change.selector ?? ''
 
   if ((prop === 'left' || prop === 'top') && isGridLayoutContext(selector)) {
     const alt = prop === 'left' ? 'margin-inline-start' : 'margin-top'

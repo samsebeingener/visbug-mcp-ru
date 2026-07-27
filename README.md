@@ -44,7 +44,19 @@ Chrome (VisBug + расширение)
 
 ## Установка
 
-### 1. Зависимости
+**Полная инструкция:** [docs/INSTALL.ru.md](docs/INSTALL.ru.md)  
+**В Cursor:** команда `/visbug-mcp-start` (файл `.cursor/commands/visbug-mcp-start.md`).
+
+```bash
+git clone https://github.com/samsebeingener/visbug-mcp-ru.git
+cd visbug-mcp-ru
+npm install
+npm run setup
+```
+
+`npm run setup` — интерактивно: путь к проекту сайта, MCP в Cursor, демон, опционально **auto-agent** (после «Стоп» Cursor CLI применяет правки сам).
+
+### 1. Зависимости (ручной путь)
 
 ```bash
 git clone https://github.com/samsebeingener/visbug-mcp-ru.git

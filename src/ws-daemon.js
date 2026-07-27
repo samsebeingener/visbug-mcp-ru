@@ -5,8 +5,10 @@
 
 import { WebSocketServer } from 'ws'
 import { parseMutationsToChanges, formatChangesFromStore, clearSeen, restoreSeen } from './parser.js'
+import { loadConfig } from './config.js'
+import { maybeSpawnAutoAgent, checkCursorCliAvailable } from './auto-agent.js'
 import { execSync } from 'child_process'
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
@@ -68,13 +70,35 @@ function sendStats(ws) {
   syncFromFile()
   const pending = store.changes.filter(c => !c.applied)
   const changesText = pending.length === 0 ? '' : formatChangesFromStore(store.changes)
+  const config = loadConfig()
   ws.send(JSON.stringify({
     event: 'stats',
     total: pending.length,
     changesText,
     recording: recordingActive,
     mode: 'record',
+    health: buildHealthSnapshot(config),
   }))
+}
+
+function buildHealthSnapshot(config) {
+  const mcpPath = join(homedir(), '.cursor', 'mcp.json')
+  let mcpOk = false
+  try {
+    if (existsSync(mcpPath)) {
+      const mcp = JSON.parse(readFileSync(mcpPath, 'utf8'))
+      const servers = mcp.mcpServers ?? mcp
+      const entry = servers['visbug-mcp'] ?? servers.visbug_mcp
+      mcpOk = Boolean(entry?.args?.some?.((a) => String(a).includes('server.js')))
+    }
+  } catch {}
+
+  return {
+    autoAgentEnabled: Boolean(config.autoAgent?.enabled),
+    workspace: config.autoAgent?.workspace || '',
+    mcpConfigured: mcpOk,
+    repoRoot: config.repoRoot || '',
+  }
 }
 
 loadStore()
@@ -137,6 +161,18 @@ wss.on('connection', (ws) => {
         sendStats(ws)
       }
 
+      if (msg.event === 'popup-health') {
+        const config = loadConfig()
+        checkCursorCliAvailable(config).then((cli) => {
+          ws.send(JSON.stringify({
+            event: 'health',
+            ...buildHealthSnapshot(config),
+            cursorCli: cli.ok,
+            cursorCliCommand: cli.command,
+          }))
+        })
+      }
+
       if (msg.event === 'popup-recording-start') {
         clearStopWatchdog()
         recordingActive = true
@@ -164,6 +200,13 @@ wss.on('connection', (ws) => {
         const total = (msg.changes ?? []).filter(c => !c.applied).length
         process.stderr.write(`[ws-daemon] запись: ${msg.changes?.length ?? 0} правок после diff\n`)
         broadcast({ event: 'recording-finished', total })
+        maybeSpawnAutoAgent({ total, url: msg.url }).then((result) => {
+          if (result.spawned) {
+            broadcast({ event: 'auto-agent-started', workspace: result.workspace, total })
+          } else if (result.reason && result.reason !== 'auto-agent disabled') {
+            broadcast({ event: 'auto-agent-skipped', reason: result.reason, total })
+          }
+        })
       }
 
       if (msg.event === 'recording-error') {

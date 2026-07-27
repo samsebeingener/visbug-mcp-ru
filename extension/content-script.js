@@ -14,6 +14,7 @@ const LIVE_OBSERVER_ENABLED = false
 const snap = () => globalThis.VisbugMcpSnapshot
 const guides = () => globalThis.VisbugMcpAlignmentGuides
 const badge = () => globalThis.VisbugMcpRecordingBadge
+const textWatch = () => globalThis.VisbugMcpRecordingTextWatch
 
 let socket = null
 let connected = false
@@ -38,6 +39,7 @@ function connect() {
         recordingScopeRoot = null
         guides()?.stop()
         badge()?.stop()
+        textWatch()?.stop()
         const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
         removed.forEach(k => localStorage.removeItem(k))
       }
@@ -102,8 +104,10 @@ function startRecordingSnapshot() {
   const root = recordingScopeRoot
   recordingRootSelector = getSelector(root)
   recordingBefore = snap().captureSnapshot(root, getSelector)
+  globalThis.__visbugMcpRecordingBefore = recordingBefore
   guides()?.start(recordingScopeRoot)
   badge()?.start()
+  textWatch()?.start(recordingScopeRoot, getSelector, { url: location.href })
   send({
     event: 'recording-started',
     url: location.href,
@@ -117,6 +121,7 @@ function finishRecordingSnapshot() {
   if (!recordingBefore) {
     guides()?.stop()
     badge()?.stop()
+    textWatch()?.stop()
     send({ event: 'recording-error', url: location.href, message: 'Снимок «до» не найден. Нажмите «Начать запись» ещё раз.' })
     return
   }
@@ -126,7 +131,12 @@ function finishRecordingSnapshot() {
     requestAnimationFrame(() => {
       const root = recordingScopeRoot ?? snap().getDefaultSnapshotRoot(document)
       const after = snap().captureSnapshot(root, getSelector)
-      const changes = snap().diffSnapshots(recordingBefore, after, { url: location.href })
+      const snapshotChanges = snap().diffSnapshots(recordingBefore, after, { url: location.href })
+      const watchedText = textWatch()?.drainChanges?.() ?? []
+      textWatch()?.stop()
+      const changes = snap().mergeTextChanges
+        ? snap().mergeTextChanges(snapshotChanges, watchedText)
+        : snapshotChanges
 
       send({
         event: 'recording-result',
@@ -136,6 +146,7 @@ function finishRecordingSnapshot() {
       })
 
       recordingBefore = null
+      globalThis.__visbugMcpRecordingBefore = null
       recordingScopeRoot = null
       guides()?.stop()
       badge()?.stop()
