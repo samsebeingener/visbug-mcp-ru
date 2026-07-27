@@ -65,15 +65,17 @@ function renderHealth(h) {
     line(h.mcpConfigured, 'MCP в Cursor'),
     line(fileApplyOk, `Запись в файлы после Стоп → ${ws}`),
   ]
-  if (h.cursorCli) {
+  if (h.cursorCli && h.spawnCli) {
     const cliLabel = h.cursorCliCommand
-      ? `CLI ${h.cursorCliCommand} (доп.)`
-      : 'CLI agent (доп.)'
+      ? `CLI ${h.cursorCliCommand} (фон)`
+      : 'CLI agent (фон)'
     lines.push(line(true, cliLabel))
   } else if (fileApplyOk) {
-    lines.push(line(false, 'CLI agent — не нужен (есть auto-apply)', true))
+    lines.push(line(false, 'CLI не запускается — остаток через /visbug-apply', true))
+  } else if (h.cursorCli) {
+    lines.push(line(true, 'CLI установлен (не используется)'))
   } else {
-    lines.push(line(false, `CLI ${h.cursorCliCommand || 'agent'}`))
+    lines.push(line(false, 'CLI agent не установлен', true))
   }
   healthEl.innerHTML = lines.join('<br>')
 }

@@ -95,6 +95,7 @@ function buildHealthSnapshot(config) {
 
   return {
     autoAgentEnabled: Boolean(config.autoAgent?.enabled),
+    spawnCli: config.autoAgent?.spawnCli === true,
     workspace: config.autoAgent?.workspace || '',
     mcpConfigured: mcpOk,
     repoRoot: config.repoRoot || '',
@@ -219,7 +220,7 @@ wss.on('connection', (ws) => {
               event: 'apply-incomplete',
               applied: result.applied,
               remaining: result.remaining,
-              message: `В файлы: ${result.applied}. Не применено: ${result.remaining} (текст CMS? → /visbug-apply)`,
+              message: `В файлы: ${result.applied}. Осталось ${result.remaining} → /visbug-apply в Cursor (без терминала)`,
             })
           } else if (result.spawned) {
             broadcast({
@@ -233,7 +234,7 @@ wss.on('connection', (ws) => {
               event: 'apply-incomplete',
               applied: result.applied ?? 0,
               remaining: result.remaining ?? total,
-              message: `Не применено: ${result.remaining ?? total}. Открой Cursor → /visbug-apply`,
+              message: `Не применено: ${result.remaining ?? total}. Cursor → /visbug-apply (терминал не нужен)`,
             })
           } else if (result.action !== 'disabled') {
             broadcast({ event: 'auto-agent-skipped', reason: result.reason ?? result.agentReason, total })

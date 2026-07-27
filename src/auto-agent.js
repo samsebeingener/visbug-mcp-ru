@@ -76,6 +76,17 @@ export async function handlePostRecording(meta = {}, changes = []) {
     return { action: 'auto-applied', spawned: false, ...applyResult, remaining: 0 }
   }
 
+  if (config.autoAgent.spawnCli !== true) {
+    log(`осталось ${remaining} правок — CLI не запускаем (spawnCli=false). /visbug-apply в Cursor`)
+    return {
+      action: applyResult.applied > 0 ? 'auto-applied-partial' : 'failed',
+      spawned: false,
+      ...applyResult,
+      remaining,
+      reason: 'use-visbug-apply',
+    }
+  }
+
   const agentResult = await maybeSpawnAutoAgent({ ...meta, total: remaining }, changes)
   if (agentResult.spawned) {
     return { action: 'agent-spawned', ...applyResult, remaining, ...agentResult }
@@ -139,21 +150,31 @@ export async function maybeSpawnAutoAgent(meta = {}, changes = []) {
   const countNote = `\n\nВ буфере правок после записи: ${meta.total ?? '?'}.`
   const fullPrompt = `${prompt}${urlNote}${countNote}`
 
-  const args = ['-p', '--workspace', workspace]
-  if (config.autoAgent.useForce !== false) args.push('--force')
-  args.push(fullPrompt)
-
   const cmd = resolveCursorCli(config)
   lastSpawnAt = now
   agentRunning = true
 
-  const child = spawn(cmd, args, {
-    shell: true,
+  const args = ['-p', '--workspace', workspace]
+  if (config.autoAgent.useForce !== false) args.push('--force')
+  args.push(fullPrompt)
+
+  const spawnOpts = {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
     env: { ...process.env },
-  })
+  }
+
+  let child
+  if (process.platform === 'win32' && /\.cmd$/i.test(cmd)) {
+    // Без shell: true — иначе на Windows всплывает консоль
+    child = spawn('cmd.exe', ['/c', cmd, ...args], {
+      ...spawnOpts,
+      shell: false,
+    })
+  } else {
+    child = spawn(cmd, args, { ...spawnOpts, shell: false })
+  }
 
   child.on('error', (err) => {
     agentRunning = false

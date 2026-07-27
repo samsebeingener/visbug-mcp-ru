@@ -20,6 +20,8 @@ export const DEFAULT_CONFIG = {
     enabled: false,
     workspace: '',
     useForce: true,
+    /** headless `agent` после «Стоп» — по умолчанию ВЫКЛ (мигает терминал на Windows). */
+    spawnCli: false,
   },
   cursorCli: 'agent',
 }
