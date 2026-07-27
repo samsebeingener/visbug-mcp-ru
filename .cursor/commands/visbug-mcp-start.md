@@ -1,154 +1,46 @@
 ---
-description: Полная установка и работа VisBug MCP Bridge — от клона репо до auto-agent после «Стоп»
+description: VisBug MCP — шпаргалка и диагностика (v0.6.2)
 ---
 
-# VisBug MCP Bridge — старт
+# VisBug MCP — для пользователя
 
-Ты — **онбординг-ассистент** VisBug MCP Bridge (репозиторий `visbug-mcp-ru`).
+**Ответь коротко, по-русски, 5–8 строк.** Не вываливай фазы установки, если пользователь уже работает.
 
-Пользователь дал ссылку на репо или открыл его в Cursor. Проведи установку **фаз 1–5** и выдай краткую шпаргалку по работе.
+## Что это
 
-**Язык с пользователем:** русский.
+VisBug в Chrome → правишь сайт визуально → **Стоп** в popup → правки **сами попадают в файлы** проекта (`frontend-new`, CSS и т.д.). **Команды в чате не нужны.** Cursor CLI (`agent`) **не обязателен**.
 
----
+## Ежедневный цикл
 
-## Фаза 0 — что понадобится
+1. `npm run dev` в `frontend-new`
+2. Popup visbug-mcp: **зелёная точка** (демон запущен)
+3. VisBug → popup **Начать запись** → правки → **Стоп**
+4. В popup: «Готово: N правок в файлы» — смотри diff в редакторе
 
-| Компонент | Зачем |
-|-----------|--------|
-| **Node.js 20+** | демон + MCP |
-| **Chrome** | VisBug + наше расширение |
-| **VisBug** | [Chrome Web Store](https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc) |
-| **Cursor IDE** | редактор + MCP |
-| **Cursor CLI** (`agent`) | auto-agent после «Стоп» — [документация CLI](https://cursor.com/docs/cli/overview) |
-| **Этот репозиторий** | `git clone https://github.com/samsebeingener/visbug-mcp-ru.git` |
+**Важно:** жми **Стоп** до закрытия VisBug.
 
----
+## Если сломалось
 
-## Фаза 1 — клон и зависимости
+| Симптом | Что сделать |
+|---------|-------------|
+| Красная точка | `powershell -ExecutionPolicy Bypass -File projects/visbug-mcp-ru/scripts/start-ws-daemon.ps1` |
+| Нет правок | F5 на localhost → снова Запись → правки → Стоп |
+| ○ CLI agent — не нужен | Это норма, не ошибка |
+| MCP не видит tools | Cursor → Reload Window |
 
-В терминале (путь пользователя может отличаться):
-
-```bash
-git clone https://github.com/samsebeingener/visbug-mcp-ru.git
-cd visbug-mcp-ru
-npm install
-```
+Полный сброс: `cd projects/visbug-mcp-ru && npm run setup`
 
 ---
 
-## Фаза 2 — интерактивная настройка
+## Для агента (не показывать пользователю целиком)
 
-Спроси у пользователя **абсолютный путь к проекту сайта** (где лежит `package.json` / фронтенд, например `samsebeingener-web/frontend-new`).
+Пути Никиты (если workspace = Cursor root):
 
-Запусти:
+- Репо: `projects/visbug-mcp-ru`
+- Сайт: `projects/samsebeingener-web/frontend-new`
+- Расширение: `projects/visbug-mcp-ru/extension`
+- Логи: `~/.visbug-mcp/auto-apply.log`, `~/.visbug-mcp/agent-runs.log`
 
-```bash
-npm run setup
-```
+**Не предлагай** ставить Cursor CLI, если auto-apply уже включён. **Не предлагай** `get_changes` как основной путь.
 
-Скрипт:
-- запишет `~/.visbug-mcp/config.json` (workspace + auto-agent);
-- добавит `visbug-mcp` в `~/.cursor/mcp.json`;
-- запустит WebSocket-демон `127.0.0.1:4844`.
-
-Если пользователь хочет **auto-agent** (0 фраз после «Стоп») — при setup ответить **да** и убедиться, что выполнен `agent login`.
-
-Проверка:
-
-```bash
-npm run health
-```
-
----
-
-## Фаза 3 — расширения Chrome
-
-### VisBug (официальный)
-Установить из Chrome Web Store (ссылка выше).
-
-### visbug-mcp (наше)
-1. `chrome://extensions`
-2. **Режим разработчика** — вкл.
-3. **Загрузить распакованное**
-4. Папка: `<путь-к-репо>/extension` (не корень репо!)
-
-После обновления кода расширения — **Обновить** на `chrome://extensions` и **F5** на localhost.
-
----
-
-## Фаза 4 — Cursor MCP
-
-После `npm run setup` в `~/.cursor/mcp.json` должна быть запись:
-
-```json
-"visbug-mcp": {
-  "command": "node",
-  "args": ["<абсолютный-путь>/visbug-mcp-ru/src/server.js"]
-}
-```
-
-Пользователь: **Cursor → Reload Window**.
-
-Скопируй файл команды в **проект сайта** (не обязательно в репо visbug-mcp):
-
-```
-<репо-visbug-mcp>/.cursor/commands/visbug-mcp-start.md
-  → <проект-сайта>/.cursor/commands/visbug-mcp-start.md
-```
-
-Тогда `/visbug-mcp-start` будет доступен при работе над сайтом.
-
----
-
-## Фаза 5 — демон в фоне
-
-**Windows:**
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/start-ws-daemon.ps1
-```
-
-**macOS / Linux:**
-```bash
-npm run daemon
-# или pm2: pm2 start src/ws-daemon.js --name visbug-ws
-```
-
-Popup расширения: **зелёная точка** = демон online.
-
----
-
-## Как работать (ежедневный цикл)
-
-1. Запустить dev-сервер сайта (`npm run dev` в проекте сайта).
-2. Убедиться, что демон visbug-mcp запущен.
-3. Chrome → localhost → открыть **VisBug**.
-4. Popup **visbug-mcp** → **Начать запись** (на странице бейдж **ЗАПИСЬ**).
-5. Правки в VisBug (стили, текст, layout).
-6. **Стоп — завершить запись**.
-7. **Если auto-agent включён** — Cursor CLI сам применит правки в workspace (лог: `~/.visbug-mcp/agent-runs.log`).
-8. **Если auto-agent выключен** — в Cursor: «вызови get_changes» или **Скопировать правки** в popup.
-
-**Важно:** нажимать **Стоп** до закрытия VisBug, иначе inline-правки могут слететь с DOM.
-
----
-
-## Диагностика
-
-| Симптом | Решение |
-|---------|---------|
-| Красная точка в popup | `npm run daemon` или `start-ws-daemon.ps1` |
-| Нет правок в буфере | F5 → снова Start → правки → Stop |
-| Auto-agent не стартует | `npm run health`, `agent login`, проверить workspace в config |
-| MCP не видит tools | Reload Window, проверить mcp.json |
-
----
-
-## Твои действия как агента
-
-1. Выполни фазы 1–2 (clone, npm install, npm run setup) — **спроси путь к проекту сайта**.
-2. Выдай пользователю чеклист фаз 3–4 (расширения + Reload Window).
-3. Объясни ежедневный цикл одним абзацем.
-4. Если пользователь работает только над сайтом — напомни скопировать эту команду в `.cursor/commands/` проекта сайта.
-
-Не выдумывай пути — используй реальные пути пользователя после setup.
+По запросу: проверь `npm run health`, перезапусти демон, версию расширения **0.6.2+**.
