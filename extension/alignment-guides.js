@@ -4,14 +4,15 @@
  * Drag: короткие линии между перетаскиваемым и целевым элементом + подпись.
  */
 
-const ALIGNMENT_GUIDES_VERSION = '0.6.1'
+const ALIGNMENT_GUIDES_VERSION = '0.6.12'
 
 if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
   globalThis.VisbugMcpAlignmentGuides?.stop?.()
   const SNAP_THRESHOLD_PX = 4
   const PROXIMITY_PX = 96
   const GRID_COLUMNS = 12
-  const COLOR_GRID = 'rgba(148, 163, 184, 0.14)'
+  const COLOR_GRID = 'rgba(56, 189, 248, 0.32)'
+  const COLOR_GRID_MAJOR = 'rgba(56, 189, 248, 0.48)'
   const COLOR_NEAR = 'rgba(239, 68, 68, 0.45)'
   const COLOR_ACTIVE = '#ef4444'
   const Z_INDEX = 2147483645
@@ -91,6 +92,34 @@ if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
       { kind: 'bottom', value: rect.bottom },
       { kind: 'center', value: rect.top + rect.height / 2 },
     ]
+  }
+
+  function collectGridContainers(root) {
+    const selectors = [
+      '.site-container',
+      '.monochrom-content-section__inner',
+      'main',
+    ]
+    const seen = new Set()
+    const out = []
+
+    for (const sel of selectors) {
+      for (const el of root.querySelectorAll(sel)) {
+        if (!(el instanceof HTMLElement) || seen.has(el)) continue
+        if (shouldSkipElement(el)) continue
+        const r = el.getBoundingClientRect()
+        if (r.width < 80 || r.height < 40) continue
+        seen.add(el)
+        out.push(el)
+      }
+    }
+
+    if (out.length === 0 && root instanceof HTMLElement) {
+      const r = root.getBoundingClientRect()
+      if (r.width >= 80) out.push(root)
+    }
+
+    return out.sort((a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width)
   }
 
   function findAlignmentMatches(dragEl, dragRect, candidates) {
@@ -205,33 +234,46 @@ if (globalThis.VisbugMcpAlignmentGuides?.version !== ALIGNMENT_GUIDES_VERSION) {
     },
 
     drawColumnGrid(h) {
-      const containers = this.root.querySelectorAll('.site-container')
+      const containers = collectGridContainers(this.root)
       const seen = new Set()
 
       for (const container of containers) {
         if (shouldSkipElement(container)) continue
         const r = container.getBoundingClientRect()
-        if (r.width < 120 || r.bottom < 0 || r.top > h) continue
+        if (r.width < 80) continue
 
         const key = `${Math.round(r.left)}:${Math.round(r.width)}`
         if (seen.has(key)) continue
         seen.add(key)
 
         const colW = r.width / GRID_COLUMNS
-        const y1 = Math.max(0, r.top)
-        const y2 = Math.min(h, r.bottom)
+        const y1 = 0
+        const y2 = h
 
         for (let i = 0; i <= GRID_COLUMNS; i++) {
           const x = r.left + colW * i
+          const major = i === 0 || i === GRID_COLUMNS || i === GRID_COLUMNS / 2
           this.svg.appendChild(svgEl('line', {
             x1: x,
             x2: x,
             y1,
             y2,
-            stroke: COLOR_GRID,
-            'stroke-width': 1,
+            stroke: major ? COLOR_GRID_MAJOR : COLOR_GRID,
+            'stroke-width': major ? 1.25 : 1,
           }))
         }
+      }
+
+      // крупные горизонтали каждые 64px
+      for (let y = 0; y <= h; y += 64) {
+        this.svg.appendChild(svgEl('line', {
+          x1: 0,
+          x2: window.innerWidth,
+          y1: y,
+          y2: y,
+          stroke: 'rgba(148, 163, 184, 0.16)',
+          'stroke-width': 1,
+        }))
       }
     },
 

@@ -119,6 +119,51 @@ export const AUTO_APPLY_SAFE_PROPERTIES = new Set([
 export const AUTO_APPLY_BLOCKED_SELECTOR_RE =
   /editorial-card-glow|pointer-events-none|vibe-annotations|visbug-mcp-guides/i
 
+/** Классы, по которым строим короткий селектор для CSS. */
+const MEANINGFUL_APPLY_CLASSES = [
+  'builder-rich-text',
+  'service-cell',
+  'services-matrix',
+  'service-title',
+  'service-desc',
+  'section-title',
+  'hero-copy',
+  'main-block-card',
+  'cards-scroll-rail',
+  'pricing-scroll-rail',
+  'faq-inner',
+  'monochrom-content-section__inner',
+]
+
+/**
+ * Длинный путь VisBug → короткий селектор для sections.css
+ * @example `#services > … > p:nth-of-type(1)` → `#services .builder-rich-text p:nth-of-type(1)`
+ */
+export function simplifySelectorForApply(selector, tag = '') {
+  if (!selector || typeof selector !== 'string') return null
+  if (AUTO_APPLY_BLOCKED_SELECTOR_RE.test(selector)) return null
+
+  const section = extractSectionKey(selector)
+  if (!section) return selector.length <= 240 ? selector : null
+
+  const anchorClass = MEANINGFUL_APPLY_CLASSES.find((cls) => selector.includes(cls))
+  const last = selector.split(' > ').pop() ?? ''
+  const nth = last.match(/:nth-of-type\((\d+)\)/)?.[1]
+    ?? last.match(/:nth-child\((\d+)\)/)?.[1]
+  const tagName = (last.match(/^([a-z][\w-]*)/i)?.[1] || tag || '').toLowerCase()
+
+  let short = `#${section}`
+  if (anchorClass && !anchorClass.includes('__inner')) {
+    short += ` .${anchorClass}`
+  }
+  if (tagName && tagName !== 'div') {
+    short += ` ${tagName}`
+  }
+  if (nth) short += `:nth-of-type(${nth})`
+
+  return short.length <= 240 ? short : `#${section} ${tagName || ''}`.trim()
+}
+
 const VISBUG_SECTION_IDS = new Set([
   'vibe-annotations-root',
   'visbug-mcp-guides-root',

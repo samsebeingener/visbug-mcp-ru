@@ -10,6 +10,8 @@ import {
   isGridLayoutContext,
   AUTO_APPLY_SAFE_PROPERTIES,
   AUTO_APPLY_BLOCKED_SELECTOR_RE,
+  simplifySelectorForApply,
+  extractSectionKey,
 } from './parser.js'
 import { getStoreDir } from './config.js'
 
@@ -61,9 +63,17 @@ function mapProperty(change) {
 }
 
 function isAutoApplySelector(selector) {
-  if (!selector || selector.length > 200) return false
+  if (!selector) return false
   if (AUTO_APPLY_BLOCKED_SELECTOR_RE.test(selector)) return false
-  return true
+  return selector.length <= 240
+}
+
+function resolveApplySelector(change) {
+  const raw = change.selector ?? ''
+  if (isAutoApplySelector(raw)) return raw
+  const simplified = simplifySelectorForApply(raw, change.tag)
+  if (simplified && isAutoApplySelector(simplified)) return simplified
+  return null
 }
 
 function formatCssValue(prop, value) {
@@ -112,6 +122,14 @@ function pickCssFile(workspace, selector) {
   const prefer = files.filter((f) => /sections\.css$/i.test(f))
   const pool = prefer.length ? prefer : files
   const sel = normalizeSelector(selector)
+  const section = extractSectionKey(sel)
+
+  if (section) {
+    for (const file of pool) {
+      const css = readFileSync(file, 'utf8')
+      if (css.includes(`#${section}`)) return file
+    }
+  }
 
   for (const file of pool) {
     const css = readFileSync(file, 'utf8')
@@ -196,13 +214,14 @@ export function autoApplyWorkspace(workspace, changes) {
       continue
     }
 
-    if (!isAutoApplySelector(change.selector ?? '')) {
+    const applySelector = resolveApplySelector(change)
+    if (!applySelector) {
       skipped++
       log(`style skip selector ${change.selector?.slice(0, 60)}…`)
       continue
     }
 
-    const file = pickCssFile(workspace, change.selector ?? '')
+    const file = pickCssFile(workspace, applySelector)
     if (!file) {
       skipped++
       continue
@@ -210,13 +229,14 @@ export function autoApplyWorkspace(workspace, changes) {
 
     const value = formatCssValue(prop, change.newValue)
     const css = readFileSync(file, 'utf8')
-    const next = upsertRule(css, change.selector, prop, value)
+    const next = upsertRule(css, applySelector, prop, value)
     if (next !== css) {
       writeFileSync(file, next, 'utf8')
       change.applied = true
       applied++
       files.add(file)
-      log(`style OK ${prop}=${value} → ${file}`)
+      const note = applySelector !== change.selector ? ` (${applySelector})` : ''
+      log(`style OK ${prop}=${value}${note} → ${file}`)
     } else {
       skipped++
     }

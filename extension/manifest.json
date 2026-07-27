@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VisBug MCP Bridge (RU)",
-  "version": "0.6.9",
+  "version": "0.6.13",
   "description": "Передаёт правки VisBug на локальный MCP-сервер (127.0.0.1:4844)",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
@@ -22,6 +22,18 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "VisBug MCP"
+    "default_title": "VisBug MCP",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
   }
 }
