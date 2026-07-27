@@ -131,8 +131,8 @@ pm2 save
 Пример вывода:
 
 ```
-[0] .card > h2 → CSS: font-size: 18px (было: 16px)
-[1] .btn--primary → CSS: background: rgb(59, 130, 246) (было: rgb(99, 102, 241))
+[0] .card > h2 → стиль: font-size = 18px (было: 16px)
+[1] .btn--primary → стиль: background = rgb(59, 130, 246) (было: rgb(99, 102, 241))
 [2] #hero-title → текст: «Новый заголовок» (было: «Старый заголовок»)
 ```
 

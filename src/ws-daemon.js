@@ -1,13 +1,10 @@
 /**
- * ws-daemon.js
- *
- * Serveur WebSocket autonome — à lancer une fois au démarrage.
- * Capture les mutations VisBug depuis l'extension Chrome.
- * Indépendant du serveur MCP (server.js).
+ * ws-daemon.js — фоновый WebSocket-сервер (127.0.0.1:4844).
+ * Принимает мутации от расширения Chrome. MCP — отдельно в server.js.
  */
 
 import { WebSocketServer } from 'ws'
-import { parseMutationsToChanges, formatForClaude, clearSeen, restoreSeen } from './parser.js'
+import { parseMutationsToChanges, formatChangesFromStore, clearSeen, restoreSeen } from './parser.js'
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
@@ -28,9 +25,9 @@ function loadStore() {
     const data = JSON.parse(readFileSync(STORE_FILE, 'utf8'))
     store.changes = data.changes ?? []
     restoreSeen(store.changes)
-    process.stderr.write(`[ws-daemon] store restauré : ${store.changes.length} changement(s)\n`)
+    process.stderr.write(`[ws-daemon] store загружен: ${store.changes.length} правок\n`)
   } catch {
-    // Fichier absent — store vide
+    // файла нет — пустой буфер
   }
 }
 
@@ -39,7 +36,7 @@ function saveStore() {
     mkdirSync(STORE_DIR, { recursive: true })
     writeFileSync(STORE_FILE, JSON.stringify({ changes: store.changes }, null, 2))
   } catch (err) {
-    process.stderr.write(`[ws-daemon] erreur sauvegarde : ${err.message}\n`)
+    process.stderr.write(`[ws-daemon] ошибка сохранения: ${err.message}\n`)
   }
 }
 
@@ -111,9 +108,9 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.event === 'popup-ping') {
-        syncFromFile() // récupère les changements apply/clear du MCP
+        syncFromFile()
         const pending = store.changes.filter(c => !c.applied)
-        const changesText = pending.length === 0 ? '' : formatForClaude(pending)
+        const changesText = pending.length === 0 ? '' : formatChangesFromStore(store.changes)
         ws.send(JSON.stringify({ event: 'stats', total: pending.length, changesText }))
       }
 
@@ -134,4 +131,4 @@ wss.on('connection', (ws) => {
   })
 })
 
-process.stderr.write('[ws-daemon] démarré — en attente de connexions\n')
+process.stderr.write('[ws-daemon] запущен — ожидание подключений\n')

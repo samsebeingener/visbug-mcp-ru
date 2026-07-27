@@ -1,9 +1,9 @@
 /**
- * server.js — MCP server (stdio)
+ * server.js — MCP-сервер (stdio)
  *
- * Démarré par Claude Code à la demande.
- * Lit et écrit le fichier store (~/.visbug-mcp/changes.json).
- * Le serveur WebSocket est géré séparément par ws-daemon.js.
+ * Запускается Cursor по запросу.
+ * Читает и пишет ~/.visbug-mcp/changes.json.
+ * WebSocket — отдельно в ws-daemon.js.
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -12,7 +12,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
-import { formatForClaude } from './parser.js'
+import { formatChangesFromStore } from './parser.js'
 import { readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
@@ -86,9 +86,9 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (req) => {
 
   if (name === 'get_changes') {
     const changes = readStore()
-    let result = changes.filter(c => !c.applied)
-    if (args?.filter) result = result.filter(c => c.type === args.filter)
-    const text = result.length === 0 ? 'Нет правок.' : formatForClaude(result)
+    const filter = args?.filter
+    const hasPending = changes.some(c => !c.applied && (!filter || c.type === filter))
+    const text = hasPending ? formatChangesFromStore(changes, { type: filter }) : 'Нет правок.'
     return { content: [{ type: 'text', text }] }
   }
 

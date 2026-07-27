@@ -1,8 +1,5 @@
 /**
- * parser.js
- *
- * Transforme les mutations brutes reçues du content-script
- * en un tableau de changements propres et déduplicés.
+ * parser.js — парсинг мутаций VisBug и форматирование правок для MCP / буфера.
  */
 
 let seen = new Map()
@@ -11,8 +8,7 @@ export function clearSeen() {
   seen = new Map()
 }
 
-// Reconstruit le Map `seen` à partir de changements chargés depuis le disque
-// pour que la déduplication reste cohérente après un redémarrage
+// Восстанавливает Map `seen` из файла store после перезапуска демона
 export function restoreSeen(changes) {
   seen = new Map()
   for (const c of changes) {
@@ -20,7 +16,7 @@ export function restoreSeen(changes) {
   }
 }
 
-// ─── Filtres bruit ────────────────────────────────────────────────────────────
+// ─── Фильтры шума ───────────────────────────────────────────────────────────
 
 const NOISE_SELECTORS = [
   /^#vibe-annotations-root/,
@@ -31,7 +27,7 @@ const NOISE_SELECTORS = [
 ]
 
 const NOISE_CSS_PROPS = [
-  /^--[a-f0-9]{8}-/i,   // CSS vars scopées Vue (ex: --dc13a441-Z_INDEX...)
+  /^--[a-f0-9]{8}-/i,
 ]
 
 const NOISE_CLASSES = [
@@ -43,21 +39,17 @@ function isNoise(m) {
   if (NOISE_SELECTORS.some(r => r.test(m.selector ?? ''))) return true
   if (m.type === 'style' && NOISE_CSS_PROPS.some(r => r.test(m.property ?? ''))) return true
   if (m.type === 'text' && m.oldValue === null) {
-    // Dump de rendu initial = newValue très long (tout le texte de la page concaténé)
-    // Texte ajouté à un élément vide = newValue court = signal légitime à garder
     if (!m.newValue || m.newValue.trim().length > 150) return true
   }
-  if (m.type === 'attribute' && m.attribute === 'contenteditable') return true  // VisBug interne
+  if (m.type === 'attribute' && m.attribute === 'contenteditable') return true
   if (m.type === 'attribute' && m.attribute === 'class') {
-    // Filtrer seulement si le changement ne porte QUE sur des classes framework
-    // (router-link-active, transitions) — pas si l'utilisateur a changé une vraie classe
     const addedClasses = (m.newValue ?? '').split(/\s+/).filter(c => c && !((m.oldValue ?? '').split(/\s+/).includes(c)))
     const removedClasses = (m.oldValue ?? '').split(/\s+/).filter(c => c && !((m.newValue ?? '').split(/\s+/).includes(c)))
     const delta = [...addedClasses, ...removedClasses]
-    if (delta.length === 0) return true  // aucun changement réel
-    if (delta.every(cls => NOISE_CLASSES.some(r => r.test(cls)))) return true  // que du framework
+    if (delta.length === 0) return true
+    if (delta.every(cls => NOISE_CLASSES.some(r => r.test(cls)))) return true
   }
-  if (m.type === 'node-added' || m.type === 'node-removed') return true  // renders Vue
+  if (m.type === 'node-added' || m.type === 'node-removed') return true
   return false
 }
 
@@ -123,24 +115,37 @@ function normalize(m) {
   }
 }
 
-export function formatForClaude(changes) {
+function formatOldValue(value) {
+  if (value === null || value === undefined || value === '') return 'не задано'
+  return String(value)
+}
+
+function formatChangeLine(index, c) {
+  switch (c.type) {
+    case 'style':
+      return `[${index}] ${c.selector} → стиль: ${c.property} = ${c.newValue} (было: ${formatOldValue(c.oldValue)})`
+    case 'attribute':
+      return `[${index}] ${c.selector} → атрибут ${c.attribute} = "${c.newValue}" (было: "${formatOldValue(c.oldValue)}")`
+    case 'text':
+      return `[${index}] ${c.selector} → текст: "${c.newValue}" (было: "${formatOldValue(c.oldValue)}")`
+    case 'node-added':
+      return `[${index}] ${c.parentSelector ?? c.selector} → добавлен узел: ${(c.html ?? '').slice(0, 80)}…`
+    case 'node-removed':
+      return `[${index}] ${c.parentSelector ?? c.selector} → удалён узел <${c.tag}>`
+    default:
+      return `[${index}] ${JSON.stringify(c)}`
+  }
+}
+
+export function formatChangesFromStore(changes, { type } = {}) {
   return changes
-    .filter(c => !c.applied)
-    .map((c, i) => {
-      switch (c.type) {
-        case 'style':
-          return `[${i}] ${c.selector} → CSS: ${c.property}: ${c.newValue} (было: ${c.oldValue ?? 'не задано'})`
-        case 'attribute':
-          return `[${i}] ${c.selector} → attr[${c.attribute}]="${c.newValue}" (было: "${c.oldValue}")`
-        case 'text':
-          return `[${i}] ${c.selector} → текст: "${c.newValue}" (было: "${c.oldValue}")`
-        case 'node-added':
-          return `[${i}] ${c.parentSelector} → добавлен узел: ${c.html?.slice(0, 80)}…`
-        case 'node-removed':
-          return `[${i}] ${c.parentSelector} → удалён узел <${c.tag}>`
-        default:
-          return `[${i}] ${JSON.stringify(c)}`
-      }
-    })
+    .map((c, index) => ({ c, index }))
+    .filter(({ c }) => !c.applied && (!type || c.type === type))
+    .map(({ c, index }) => formatChangeLine(index, c))
     .join('\n')
+}
+
+/** @deprecated используйте formatChangesFromStore */
+export function formatForClaude(changes) {
+  return formatChangesFromStore(changes)
 }
