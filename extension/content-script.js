@@ -22,6 +22,17 @@ let recordingBefore = null
 let recordingRootSelector = null
 let recordingScopeRoot = null
 
+function clearVisbugPageState() {
+  recordingBefore = null
+  recordingRootSelector = null
+  recordingScopeRoot = null
+  guides()?.stop()
+  badge()?.stop()
+  textWatch()?.stop()
+  const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
+  removed.forEach(k => localStorage.removeItem(k))
+}
+
 function connect() {
   socket = new WebSocket(WS_URL)
 
@@ -34,14 +45,7 @@ function connect() {
     try {
       const msg = JSON.parse(e.data)
       if (msg.event === 'clear-visbug-storage') {
-        recordingBefore = null
-        recordingRootSelector = null
-        recordingScopeRoot = null
-        guides()?.stop()
-        badge()?.stop()
-        textWatch()?.stop()
-        const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
-        removed.forEach(k => localStorage.removeItem(k))
+        clearVisbugPageState()
       }
     } catch {}
   })
@@ -88,6 +92,7 @@ function getSelector(el) {
 }
 
 function startRecordingSnapshot() {
+  clearVisbugPageState()
   // Всегда снимаем всю главную — клики по article/section не сужают область
   recordingScopeRoot = snap().getDefaultSnapshotRoot(document)
   const root = recordingScopeRoot

@@ -143,7 +143,7 @@ C:\Users\you\projects\visbug-mcp-ru\extension
 - **Скопировать правки** в popup или MCP `get_changes` → `apply_changes` в Cursor
 - Команда `/visbug-apply` в проекте с `.cursor/commands/` (если auto-apply не добил всё)
 
-**Цикл записи:** «Начать запись» → правки в VisBug → «Стоп» → snapshot diff → auto-apply в файлы.
+**Цикл записи:** «Начать запись» (буфер очищается) → правки в VisBug → «Стоп» → snapshot diff → auto-apply в файлы.
 
 ### Popup Chrome
 

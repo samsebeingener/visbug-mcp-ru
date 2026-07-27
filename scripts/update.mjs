@@ -25,10 +25,12 @@ const REPO_ROOT = resolve(__dirname, '..')
 const STORE_DIR = join(homedir(), '.visbug-mcp')
 
 function run(cmd, args, opts = {}) {
+  const isWin = platform() === 'win32'
   const r = spawnSync(cmd, args, {
     cwd: REPO_ROOT,
     encoding: 'utf8',
     stdio: opts.inherit ? 'inherit' : 'pipe',
+    shell: isWin && (cmd === 'npm' || cmd === 'npx'),
     ...opts,
   })
   return r

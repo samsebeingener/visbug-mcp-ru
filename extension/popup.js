@@ -251,14 +251,17 @@ recordBtn.addEventListener('click', async () => {
 
   recordBtn.disabled = true
   recordBtn.textContent = 'Подготовка…'
+  wsSend({ event: 'popup-recording-start' })
+  count.textContent = 'В буфере правок: 0'
+  cachedChangesText = ''
   const tabRes = await notifyTabRecording('start')
   if (!tabRes.ok) {
     recordBtn.disabled = false
     recordBtn.textContent = 'Начать запись'
     statusEl.textContent = tabRes.error ?? 'Не удалось начать запись'
+    wsSend({ event: 'popup-recording-cancel' })
     return
   }
-  wsSend({ event: 'popup-recording-start' })
 })
 
 clearBtn.addEventListener('click', () => {

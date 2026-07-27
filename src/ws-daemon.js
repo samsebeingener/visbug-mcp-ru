@@ -148,6 +148,24 @@ function clearStopWatchdog() {
   }
 }
 
+function clearChangesBuffer({ keepRecording = false } = {}) {
+  if (!keepRecording) recordingActive = false
+  store.changes = []
+  clearSeen()
+  saveStore()
+  broadcast({ event: 'clear-visbug-storage' })
+  const config = loadConfig()
+  broadcast({
+    event: 'stats',
+    total: 0,
+    changesText: '',
+    recording: keepRecording ? true : recordingActive,
+    mode: 'record',
+    health: buildHealthSnapshot(config),
+  })
+  process.stderr.write('[ws-daemon] буфер правок очищен\n')
+}
+
 function failRecording(message) {
   recordingActive = false
   clearStopWatchdog()
@@ -182,6 +200,7 @@ wss.on('connection', (ws) => {
 
       if (msg.event === 'popup-recording-start') {
         clearStopWatchdog()
+        clearChangesBuffer({ keepRecording: true })
         recordingActive = true
         ws.send(JSON.stringify({ event: 'recording-armed' }))
         const config = loadConfig()
@@ -285,11 +304,7 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.event === 'popup-clear') {
-        recordingActive = false
-        store.changes = []
-        clearSeen()
-        saveStore()
-        broadcast({ event: 'clear-visbug-storage' })
+        clearChangesBuffer({ keepRecording: false })
       }
     } catch (err) {
       process.stderr.write(`[ws-daemon] parse error: ${err.message}\n`)
