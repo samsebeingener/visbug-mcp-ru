@@ -35,9 +35,38 @@ const NOISE_CLASSES = [
   /loading-fade-(enter|leave)-(active|from|to)/,
 ]
 
+function isNoiseStyle(m) {
+  const prop = m.property ?? ''
+  const oldV = m.oldValue ?? ''
+  const newV = m.newValue ?? ''
+
+  // Без реального изменения
+  if (oldV === newV) return true
+
+  // Артефакты drag/resize в VisBug
+  if (prop === 'cursor' || prop === 'user-select') {
+    if (!newV || newV === 'undefined') return true
+  }
+  if (prop === 'transition' && (!newV || newV === 'undefined' || (newV === 'none' && !oldV))) return true
+
+  // Случайное перетаскивание: position/left/top/width без исходного значения
+  if (prop === 'position' && newV === 'relative' && !oldV) return true
+  if ((prop === 'left' || prop === 'top' || prop === 'right' || prop === 'bottom') && !oldV) return true
+  if (prop === 'width' && !oldV && /^\d+(\.\d+)?px$/.test(String(newV))) return true
+
+  // Анимации hero / скролл / glow карточек — не layout
+  if (prop.startsWith('--hero-')) return true
+  if (['--active', '--start', '--glow-mask'].includes(prop)) return true
+  if ((m.selector ?? '').includes('scroll-progress')) return true
+  if ((m.selector ?? '').includes('hero-dual-portrait')) return true
+
+  return false
+}
+
 function isNoise(m) {
   if (NOISE_SELECTORS.some(r => r.test(m.selector ?? ''))) return true
   if (m.type === 'style' && NOISE_CSS_PROPS.some(r => r.test(m.property ?? ''))) return true
+  if (m.type === 'style' && isNoiseStyle(m)) return true
   if (m.type === 'text' && m.oldValue === null) {
     if (!m.newValue || m.newValue.trim().length > 150) return true
   }
