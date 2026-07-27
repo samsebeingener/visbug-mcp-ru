@@ -6,12 +6,14 @@
 import { WebSocketServer } from 'ws'
 import { parseMutationsToChanges, formatChangesFromStore, clearSeen, restoreSeen } from './parser.js'
 import { loadConfig } from './config.js'
-import { handlePostRecording, checkCursorCliAvailable } from './auto-agent.js'
+import { handlePostRecording } from './auto-agent.js'
+import { getCliHealthForUi } from './cli-resolver.js'
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 
+const DAEMON_VERSION = '0.6.7'
 const STORE_DIR = join(homedir(), '.visbug-mcp')
 const STORE_FILE = join(STORE_DIR, 'changes.json')
 const WS_PORT = 4844
@@ -124,7 +126,7 @@ freePort(WS_PORT)
 const wss = new WebSocketServer({ port: WS_PORT })
 
 wss.on('listening', () => {
-  process.stderr.write(`[ws-daemon] WebSocket ws://127.0.0.1:${WS_PORT} (режим: запись/snapshot)\n`)
+  process.stderr.write(`[ws-daemon] v${DAEMON_VERSION} ws://127.0.0.1:${WS_PORT} spawnCli=${loadConfig().autoAgent?.spawnCli === true}\n`)
 })
 
 wss.on('error', (err) => {
@@ -168,14 +170,13 @@ wss.on('connection', (ws) => {
 
       if (msg.event === 'popup-health') {
         const config = loadConfig()
-        checkCursorCliAvailable(config).then((cli) => {
-          ws.send(JSON.stringify({
-            event: 'health',
-            ...buildHealthSnapshot(config),
-            cursorCli: cli.ok,
-            cursorCliCommand: cli.command,
-          }))
-        })
+        const cli = getCliHealthForUi(config)
+        ws.send(JSON.stringify({
+          event: 'health',
+          ...buildHealthSnapshot(config),
+          cursorCli: cli.ok,
+          cursorCliCommand: cli.command,
+        }))
       }
 
       if (msg.event === 'popup-recording-start') {

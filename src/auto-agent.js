@@ -162,7 +162,11 @@ export async function maybeSpawnAutoAgent(meta = {}, changes = []) {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
+    shell: false,
     env: { ...process.env },
+  }
+  if (process.platform === 'win32') {
+    spawnOpts.creationFlags = 0x08000000
   }
 
   let child
