@@ -23,7 +23,7 @@ function setRecording(active) {
     : (connected ? 'Подключено к MCP-серверу' : 'MCP-сервер не запущен')
   hint.textContent = active
     ? 'REC на странице. Пишутся стили и текст (заголовки, p, span). Стоп — в буфер MCP.'
-    : '1. Начать запись → 2. Правки в VisBug (в т.ч. текст) → 3. Стоп → 4. MCP / Скопировать'
+    : '1. Начать запись → 2. Правки в VisBug → 3. Стоп → в файлы проекта'
 }
 
 function renderHealth(h) {
@@ -32,14 +32,26 @@ function renderHealth(h) {
     healthEl.textContent = 'Демон offline — npm run setup или start-ws-daemon.ps1'
     return
   }
-  const line = (ok, label) => `<span class="${ok ? 'ok' : 'bad'}">${ok ? '✓' : '✗'}</span> ${label}`
+  const line = (ok, label, neutral = false) => {
+    const cls = ok ? 'ok' : (neutral ? 'opt' : 'bad')
+    const mark = ok ? '✓' : (neutral ? '○' : '✗')
+    return `<span class="${cls}">${mark}</span> ${label}`
+  }
   const ws = h.workspace ? (h.workspace.length > 28 ? `…${h.workspace.slice(-26)}` : h.workspace) : 'не задан'
-  healthEl.innerHTML = [
+  const fileApplyOk = Boolean(h.autoAgentEnabled && h.workspace)
+  const lines = [
     line(true, 'Демон'),
     line(h.mcpConfigured, 'MCP в Cursor'),
-    line(h.cursorCli, `CLI ${h.cursorCliCommand || 'agent'}`),
-    line(h.autoAgentEnabled, `Auto-agent → ${ws}`),
-  ].join('<br>')
+    line(fileApplyOk, `Запись в файлы после Стоп → ${ws}`),
+  ]
+  if (h.cursorCli) {
+    lines.push(line(true, `CLI ${h.cursorCliCommand || 'agent'} (доп.)`))
+  } else if (fileApplyOk) {
+    lines.push(line(false, 'CLI agent — не нужен (есть auto-apply)', true))
+  } else {
+    lines.push(line(false, `CLI ${h.cursorCliCommand || 'agent'}`))
+  }
+  healthEl.innerHTML = lines.join('<br>')
 }
 
 function refreshHealth() {
