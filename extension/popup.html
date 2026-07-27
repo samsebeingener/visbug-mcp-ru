@@ -4,10 +4,14 @@
   <meta charset="UTF-8">
   <style>
     * { box-sizing: border-box; }
+    html, body {
+      min-height: 520px;
+    }
     body {
       font-family: system-ui, sans-serif;
-      padding: 20px 18px 18px;
-      width: 300px;
+      padding: 18px 16px 16px;
+      width: 380px;
+      min-height: 520px;
       background: #0d0d1a;
       color: #fff;
       margin: 0;
@@ -15,15 +19,18 @@
     h2 {
       font-size: 18px;
       font-weight: 700;
-      margin: 0 0 8px;
+      margin: 0 0 6px;
       letter-spacing: 0.02em;
     }
     .mode {
       font-size: 11px;
       color: #38bdf8;
-      margin: 0 0 14px;
+      margin: 0 0 12px;
       letter-spacing: 0.04em;
       text-transform: uppercase;
+    }
+    .status-row {
+      margin-bottom: 6px;
     }
     .dot {
       display: inline-block;
@@ -38,15 +45,36 @@
     .dot.rec { background: #f59e0b; box-shadow: 0 0 6px #f59e0b; animation: pulse 1.2s infinite; }
     @keyframes pulse { 50% { opacity: 0.5; } }
     #status { font-size: 13px; font-weight: 600; vertical-align: middle; }
-    #hint, #count, #health { font-size: 12px; color: #888; margin: 8px 0 12px; line-height: 1.45; }
-    #health { font-size: 11px; padding: 8px 10px; background: #14141f; border-radius: 6px; border: 1px solid #2a2a3a; }
+    #count {
+      font-size: 13px;
+      color: #cbd5e1;
+      margin: 0 0 14px;
+      font-weight: 500;
+    }
+    #hint {
+      display: none;
+      font-size: 11px;
+      color: #888;
+      margin: 0 0 10px;
+      line-height: 1.45;
+    }
+    #hint.show { display: block; }
+    #health {
+      font-size: 11px;
+      padding: 8px 10px;
+      background: #14141f;
+      border-radius: 6px;
+      border: 1px solid #2a2a3a;
+      margin: 14px 0 10px;
+      line-height: 1.55;
+    }
     #health .ok { color: #22c55e; }
     #health .bad { color: #f87171; }
     #health .opt { color: #94a3b8; }
     #install-hint {
       font-size: 10px;
       color: #94a3b8;
-      margin: 0 0 10px;
+      margin: 0;
       padding: 8px 10px;
       background: #14141f;
       border-radius: 6px;
@@ -56,9 +84,10 @@
     }
     #install-hint a { color: #38bdf8; }
     #install-hint code { color: #e2e8f0; font-size: 10px; }
+    .actions { margin-bottom: 4px; }
     button {
       display: block;
-      margin-top: 10px;
+      margin-top: 8px;
       width: 100%;
       padding: 10px;
       font-size: 13px;
@@ -95,17 +124,22 @@
 <body>
   <h2>VisBug MCP Bridge</h2>
   <p class="mode">Режим: запись (snapshot) + сетка</p>
-  <div>
+
+  <div class="status-row">
     <span class="dot" id="dot"></span>
     <span id="status">Подключение…</span>
   </div>
-  <p id="hint">1. Начать запись → 2. Правки в VisBug → 3. Стоп → правки сами попадут в файлы проекта.</p>
-  <p id="count"></p>
-  <div id="install-hint">Загрузка путей установки…</div>
+  <p id="hint"></p>
+  <p id="count">В буфере правок: 0</p>
+
+  <div class="actions">
+    <button id="record-btn" disabled>Начать запись</button>
+    <button id="copy-btn" disabled>Скопировать правки</button>
+    <button id="clear-btn" disabled>Очистить правки</button>
+  </div>
+
   <div id="health">Проверка…</div>
-  <button id="record-btn" disabled>Начать запись</button>
-  <button id="copy-btn" disabled>Скопировать правки</button>
-  <button id="clear-btn" disabled>Очистить правки</button>
+  <div id="install-hint">Загрузка путей установки…</div>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -22,9 +22,10 @@ function setRecording(active) {
   statusEl.textContent = active
     ? 'Идёт запись… правьте в VisBug'
     : (connected ? 'Подключено к MCP-серверу' : 'MCP-сервер не запущен')
-  hint.textContent = active
-    ? 'REC на странице. Пишутся стили и текст (заголовки, p, span). Стоп — в буфер MCP.'
-    : '1. Начать запись → 2. Правки в VisBug → 3. Стоп → в файлы проекта'
+  hint.classList.toggle('show', active)
+  if (active) {
+    hint.textContent = 'REC на странице. Стили и текст. Жмите Стоп — правки уйдут в файлы.'
+  }
 }
 
 function renderInstallHint(h) {
@@ -65,7 +66,10 @@ function renderHealth(h) {
     line(fileApplyOk, `Запись в файлы после Стоп → ${ws}`),
   ]
   if (h.cursorCli) {
-    lines.push(line(true, `CLI ${h.cursorCliCommand || 'agent'} (доп.)`))
+    const cliLabel = h.cursorCliCommand
+      ? `CLI ${h.cursorCliCommand} (доп.)`
+      : 'CLI agent (доп.)'
+    lines.push(line(true, cliLabel))
   } else if (fileApplyOk) {
     lines.push(line(false, 'CLI agent — не нужен (есть auto-apply)', true))
   } else {
@@ -141,7 +145,7 @@ ws.onerror = ws.onclose = () => {
   setRecording(false)
   dot.className = 'dot off'
   statusEl.textContent = 'MCP-сервер не запущен'
-  count.textContent = 'Запустите: npm run setup'
+  count.textContent = 'В буфере правок: 0'
   renderHealth(null)
   recordBtn.disabled = true
   clearBtn.disabled = true

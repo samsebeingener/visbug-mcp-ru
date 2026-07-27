@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VisBug MCP Bridge (RU)",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Передаёт правки VisBug на локальный MCP-сервер (127.0.0.1:4844)",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
