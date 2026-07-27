@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VisBug MCP Bridge (RU)",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Передаёт правки VisBug на локальный MCP-сервер (127.0.0.1:4844)",
   "permissions": ["activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
@@ -13,7 +13,7 @@
         "https://localhost:*/*",
         "https://127.0.0.1:*/*"
       ],
-      "js": ["snapshot.js", "alignment-guides.js", "content-script.js"],
+      "js": ["snapshot.js", "alignment-guides.js", "recording-badge.js", "content-script.js"],
       "run_at": "document_idle"
     }
   ],

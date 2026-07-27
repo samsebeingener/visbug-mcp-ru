@@ -38,7 +38,7 @@ function writeStore(changes) {
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 
 const mcpServer = new Server(
-  { name: 'visbug-mcp', version: '0.1.0' },
+  { name: 'visbug-mcp', version: '0.5.0' },
   { capabilities: { tools: {} } }
 )
 
