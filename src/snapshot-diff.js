@@ -1,18 +1,11 @@
 /**
  * Snapshot до/после — diff DOM-состояния для режима «Запись».
+ * Без фильтров шума: в буфер попадает всё, что реально изменилось в inline-стилях.
  */
 
 const MAX_ELEMENTS = 1200
 
-const NOISE_SELECTORS = [
-  /^#vibe-annotations-root/,
-  /vue-devtools/,
-  /^body\s*>\s*visbug/,
-  /^body\s*>\s*vis-bug/,
-  /^#↑/,
-]
-
-export function parseInlineStyle(styleAttr) {
+function parseInlineStyle(styleAttr) {
   const map = {}
   if (!styleAttr) return map
   for (const decl of styleAttr.split(';')) {
@@ -23,6 +16,11 @@ export function parseInlineStyle(styleAttr) {
     if (prop) map[prop] = value
   }
   return map
+}
+
+function captureElementStyles(el) {
+  const cssText = el.style?.cssText || el.getAttribute('style') || ''
+  return parseInlineStyle(cssText)
 }
 
 function shouldSkipElement(el) {
@@ -53,54 +51,16 @@ export function captureSnapshot(rootEl, getSelector) {
     if (entries.length >= MAX_ELEMENTS) break
     if (shouldSkipElement(el)) continue
 
-    const selector = getSelector(el)
-    if (NOISE_SELECTORS.some(r => r.test(selector))) continue
-
     entries.push({
-      selector,
+      selector: getSelector(el),
       tag: el.tagName.toLowerCase(),
-      styles: parseInlineStyle(el.getAttribute('style')),
+      styles: captureElementStyles(el),
       className: el.getAttribute('class') ?? '',
       text: getDirectText(el),
     })
   }
 
   return entries
-}
-
-export function isNoiseStyleChange(change) {
-  const prop = change.property ?? ''
-  const oldV = change.oldValue ?? ''
-  const newV = change.newValue ?? ''
-
-  if (oldV === newV) return true
-
-  if (prop === 'cursor' || prop === 'user-select') {
-    if (!newV || newV === 'undefined') return true
-  }
-  if (prop === 'transition' && (!newV || newV === 'undefined' || (newV === 'none' && !oldV))) return true
-
-  if (prop === 'position' && newV === 'relative' && !oldV) return true
-  if ((prop === 'left' || prop === 'top' || prop === 'right' || prop === 'bottom') && !oldV) return true
-  if (prop === 'width' && !oldV && /^\d+(\.\d+)?px$/.test(String(newV))) return true
-
-  if (prop.startsWith('--hero-')) return true
-  if (['--active', '--start', '--glow-mask'].includes(prop)) return true
-  if ((change.selector ?? '').includes('scroll-progress')) return true
-  if ((change.selector ?? '').includes('hero-dual-portrait')) return true
-  if ((change.selector ?? '').includes('editorial-card-glow')) return true
-
-  return false
-}
-
-function isNoiseChange(change) {
-  if (NOISE_SELECTORS.some(r => r.test(change.selector ?? ''))) return true
-  if (change.type === 'style' && isNoiseStyleChange(change)) return true
-  if (change.type === 'attribute' && change.attribute === 'contenteditable') return true
-  if (change.type === 'text') {
-    if (!change.oldValue && (!change.newValue || change.newValue.length > 150)) return true
-  }
-  return false
 }
 
 export function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now() } = {}) {
@@ -158,7 +118,7 @@ export function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Da
     }
   }
 
-  return changes.filter(c => !isNoiseChange(c))
+  return changes
 }
 
 export function getDefaultSnapshotRoot(documentRef = globalThis.document) {

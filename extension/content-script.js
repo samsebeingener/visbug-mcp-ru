@@ -2,17 +2,22 @@
  * visbug-mcp — content-script.js (режим «Запись» по умолчанию)
  */
 
+if (globalThis.__visbugMcpContentScriptLoaded) {
+  // уже загружен через manifest — не дублировать WS/listeners
+} else {
+  globalThis.__visbugMcpContentScriptLoaded = true
+
 const WS_URL = 'ws://127.0.0.1:4844'
 const RECONNECT_DELAY = 2000
 const LIVE_OBSERVER_ENABLED = false
 
-const { captureSnapshot, diffSnapshots, getDefaultSnapshotRoot } = globalThis.VisbugMcpSnapshot
+const snap = () => globalThis.VisbugMcpSnapshot
 
 let socket = null
 let connected = false
 let recordingBefore = null
 let recordingRootSelector = null
-let snapshotScopeRoot = null
+let recordingScopeRoot = null
 
 function connect() {
   socket = new WebSocket(WS_URL)
@@ -28,7 +33,7 @@ function connect() {
       if (msg.event === 'clear-visbug-storage') {
         recordingBefore = null
         recordingRootSelector = null
-        snapshotScopeRoot = null
+        recordingScopeRoot = null
         const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
         removed.forEach(k => localStorage.removeItem(k))
       }
@@ -83,14 +88,16 @@ function getSelector(el) {
 }
 
 function resolveSnapshotRoot() {
-  if (snapshotScopeRoot?.isConnected) return snapshotScopeRoot
-  return getDefaultSnapshotRoot(document)
+  if (recordingScopeRoot?.isConnected) return recordingScopeRoot
+  return snap().getDefaultSnapshotRoot(document)
 }
 
 function startRecordingSnapshot() {
-  const root = resolveSnapshotRoot()
+  // Всегда снимаем всю главную — клики по article/section не сужают область
+  recordingScopeRoot = snap().getDefaultSnapshotRoot(document)
+  const root = recordingScopeRoot
   recordingRootSelector = getSelector(root)
-  recordingBefore = captureSnapshot(root, getSelector)
+  recordingBefore = snap().captureSnapshot(root, getSelector)
   send({
     event: 'recording-started',
     url: location.href,
@@ -106,27 +113,26 @@ function finishRecordingSnapshot() {
     return
   }
 
-  const root = resolveSnapshotRoot()
-  const after = captureSnapshot(root, getSelector)
-  const changes = diffSnapshots(recordingBefore, after, { url: location.href })
+  // Дать VisBug дописать inline-стили после drag
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const root = recordingScopeRoot ?? snap().getDefaultSnapshotRoot(document)
+      const after = snap().captureSnapshot(root, getSelector)
+      const changes = snap().diffSnapshots(recordingBefore, after, { url: location.href })
 
-  send({
-    event: 'recording-result',
-    url: location.href,
-    rootSelector: recordingRootSelector,
-    changes,
+      send({
+        event: 'recording-result',
+        url: location.href,
+        rootSelector: recordingRootSelector,
+        changes,
+      })
+
+      recordingBefore = null
+      recordingScopeRoot = null
+      console.debug('[visbug-mcp] snapshot diff:', changes.length, 'changes', changes)
+    })
   })
-
-  recordingBefore = null
-  console.debug('[visbug-mcp] snapshot diff:', changes.length, 'changes')
 }
-
-document.addEventListener('click', (e) => {
-  const target = e.target
-  if (!(target instanceof Element)) return
-  if (target.closest('vis-bug')) return
-  snapshotScopeRoot = target.closest('main, section, [id], article') ?? target
-}, true)
 
 // ─── Live observer (опционально, выключен по умолчанию) ─────────────────────
 
@@ -206,5 +212,31 @@ if (LIVE_OBSERVER_ENABLED) {
   })
 }
 
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'visbug-ping') {
+    sendResponse({ ok: true })
+    return true
+  }
+
+  if (msg.type !== 'visbug-recording') return
+
+  try {
+    if (msg.action === 'start') {
+      startRecordingSnapshot()
+      sendResponse({ ok: true })
+    } else if (msg.action === 'stop') {
+      finishRecordingSnapshot()
+      sendResponse({ ok: true })
+    } else {
+      sendResponse({ ok: false, error: 'Неизвестное действие записи.' })
+    }
+  } catch (err) {
+    sendResponse({ ok: false, error: err?.message ?? 'Ошибка записи.' })
+  }
+  return true
+})
+
 connect()
 console.debug('[visbug-mcp] режим «Запись» (snapshot), live observer:', LIVE_OBSERVER_ENABLED)
+
+} // __visbugMcpContentScriptLoaded

@@ -31,7 +31,6 @@ function refreshStats() {
 
 ws.onopen = () => {
   connected = true
-  setRecording(false)
   recordBtn.disabled = false
   clearBtn.disabled = false
   copyBtn.disabled = false
@@ -48,15 +47,19 @@ ws.onmessage = (e) => {
     }
     if (data.event === 'recording-armed') {
       setRecording(true)
+      recordBtn.disabled = false
     }
     if (data.event === 'recording-finished') {
       setRecording(false)
+      recordBtn.disabled = false
       count.textContent = `В буфере правок: ${data.total ?? 0}`
       refreshStats()
     }
     if (data.event === 'recording-error') {
       setRecording(false)
-      count.textContent = data.message ?? 'Ошибка записи'
+      recordBtn.disabled = false
+      statusEl.textContent = data.message ?? 'Ошибка записи'
+      refreshStats()
     }
   } catch {}
 }
@@ -73,13 +76,47 @@ ws.onerror = ws.onclose = () => {
   cachedChangesText = ''
 }
 
-recordBtn.addEventListener('click', () => {
-  if (!connected) return
+function notifyTabRecording(action) {
+  return new Promise((resolve) => {
+    const type = action === 'start' ? 'visbug-recording-start' : 'visbug-recording-stop'
+    chrome.runtime.sendMessage({ type }, (res) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message })
+        return
+      }
+      resolve(res ?? { ok: true })
+    })
+  })
+}
+
+recordBtn.addEventListener('click', async () => {
+  if (!connected || recordBtn.disabled) return
+
   if (recording) {
+    recordBtn.disabled = true
+    recordBtn.textContent = 'Завершение…'
+    const tabRes = await notifyTabRecording('stop')
+    if (!tabRes.ok) {
+      ws.send(JSON.stringify({ event: 'popup-recording-cancel' }))
+      recordBtn.disabled = false
+      setRecording(false)
+      statusEl.textContent = tabRes.error ?? 'Не удалось завершить запись'
+      return
+    }
     ws.send(JSON.stringify({ event: 'popup-recording-stop' }))
-  } else {
-    ws.send(JSON.stringify({ event: 'popup-recording-start' }))
+    return
   }
+
+  recordBtn.disabled = true
+  recordBtn.textContent = 'Подготовка…'
+  const tabRes = await notifyTabRecording('start')
+  if (!tabRes.ok) {
+    recordBtn.disabled = false
+    recordBtn.textContent = 'Начать запись'
+    statusEl.textContent = tabRes.error ?? 'Не удалось начать запись'
+    return
+  }
+  ws.send(JSON.stringify({ event: 'popup-recording-start' }))
 })
 
 clearBtn.addEventListener('click', () => {

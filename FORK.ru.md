@@ -1,20 +1,19 @@
 # Форк visbug-mcp-ru
 
 - **Upstream:** https://github.com/mambari/visbug-mcp
-- **Локальный путь:** `C:\Users\nkoul\tools\visbug-mcp`
-- **Версия:** 0.1.1
-- **Изменения:** русский UI (popup, MCP, формат diff)
+- **Origin:** https://github.com/samsebeingener/visbug-mcp-ru
+- **Локальный путь:** `C:\Users\nkoul\OneDrive\Документы\Cursor\projects\visbug-mcp-ru`
+- **Версия:** 0.2.0 (режим «Запись», snapshot до/после)
+- **Изменения:** русский UI (popup, MCP, формат diff), фильтры шума, запись правок
 
-Чтобы опубликовать на GitHub:
+## Работа с репозиторием
 
 ```powershell
-cd C:\Users\nkoul\tools\visbug-mcp
-git init
-git add .
-git commit -m "feat: Russian UI fork of visbug-mcp"
-# создайте репозиторий visbug-mcp-ru на GitHub, затем:
-git remote add origin git@github.com:YOUR_USER/visbug-mcp-ru.git
-git push -u origin main
+cd "C:\Users\nkoul\OneDrive\Документы\Cursor\projects\visbug-mcp-ru"
+npm install
+powershell -ExecutionPolicy Bypass -File scripts/start-ws-daemon.ps1
 ```
 
-После обновления extension в Chrome: **Обновить** на `chrome://extensions`.
+Cursor MCP (`~/.cursor/mcp.json`) → `projects/visbug-mcp-ru/src/server.js` → **Reload Window**.
+
+После обновления extension в Chrome: **Обновить** на `chrome://extensions` (папка `extension/` в этом репо).

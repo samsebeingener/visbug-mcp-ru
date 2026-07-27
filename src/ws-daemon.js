@@ -17,6 +17,8 @@ const LIVE_MUTATIONS_ENABLED = false
 
 const store = { changes: [] }
 let recordingActive = false
+let stopWatchdog = null
+const STOP_TIMEOUT_MS = 4000
 
 function loadStore() {
   try {
@@ -107,6 +109,19 @@ function broadcast(payload) {
   })
 }
 
+function clearStopWatchdog() {
+  if (stopWatchdog) {
+    clearTimeout(stopWatchdog)
+    stopWatchdog = null
+  }
+}
+
+function failRecording(message) {
+  recordingActive = false
+  clearStopWatchdog()
+  broadcast({ event: 'recording-error', message })
+}
+
 wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     try {
@@ -123,13 +138,19 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.event === 'popup-recording-start') {
+        clearStopWatchdog()
         recordingActive = true
-        broadcast({ event: 'recording-capture-before' })
         ws.send(JSON.stringify({ event: 'recording-armed' }))
       }
 
       if (msg.event === 'popup-recording-stop') {
-        broadcast({ event: 'recording-capture-after' })
+        clearStopWatchdog()
+        stopWatchdog = setTimeout(() => {
+          if (!recordingActive) return
+          failRecording(
+            'Нет ответа от страницы. Обновите вкладку (F5), снова «Начать запись» → правки → «Стоп».',
+          )
+        }, STOP_TIMEOUT_MS)
       }
 
       if (msg.event === 'recording-started') {
@@ -138,14 +159,21 @@ wss.on('connection', (ws) => {
 
       if (msg.event === 'recording-result') {
         recordingActive = false
+        clearStopWatchdog()
         setChangesFromRecording(msg.changes ?? [])
+        const total = (msg.changes ?? []).filter(c => !c.applied).length
         process.stderr.write(`[ws-daemon] запись: ${msg.changes?.length ?? 0} правок после diff\n`)
-        broadcast({ event: 'recording-finished', total: msg.changes?.length ?? 0 })
+        broadcast({ event: 'recording-finished', total })
       }
 
       if (msg.event === 'recording-error') {
+        failRecording(msg.message ?? 'Ошибка записи')
+      }
+
+      if (msg.event === 'popup-recording-cancel') {
         recordingActive = false
-        ws.send(JSON.stringify({ event: 'recording-error', message: msg.message }))
+        clearStopWatchdog()
+        sendStats(ws)
       }
 
       if (msg.event === 'popup-clear') {

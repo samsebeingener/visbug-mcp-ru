@@ -8,7 +8,6 @@ export function clearSeen() {
   seen = new Map()
 }
 
-// Восстанавливает Map `seen` из файла store после перезапуска демона
 export function restoreSeen(changes) {
   seen = new Map()
   for (const c of changes) {
@@ -16,80 +15,10 @@ export function restoreSeen(changes) {
   }
 }
 
-// ─── Фильтры шума ───────────────────────────────────────────────────────────
-
-const NOISE_SELECTORS = [
-  /^#vibe-annotations-root/,
-  /vue-devtools/,
-  /^body\s*>\s*visbug/,
-  /^body\s*>\s*vis-bug/,
-  /^#↑/,
-]
-
-const NOISE_CSS_PROPS = [
-  /^--[a-f0-9]{8}-/i,
-]
-
-const NOISE_CLASSES = [
-  /router-link-(active|exact-active)/,
-  /loading-fade-(enter|leave)-(active|from|to)/,
-]
-
-function isNoiseStyle(m) {
-  const prop = m.property ?? ''
-  const oldV = m.oldValue ?? ''
-  const newV = m.newValue ?? ''
-
-  // Без реального изменения
-  if (oldV === newV) return true
-
-  // Артефакты drag/resize в VisBug
-  if (prop === 'cursor' || prop === 'user-select') {
-    if (!newV || newV === 'undefined') return true
-  }
-  if (prop === 'transition' && (!newV || newV === 'undefined' || (newV === 'none' && !oldV))) return true
-
-  // Случайное перетаскивание: position/left/top/width без исходного значения
-  if (prop === 'position' && newV === 'relative' && !oldV) return true
-  if ((prop === 'left' || prop === 'top' || prop === 'right' || prop === 'bottom') && !oldV) return true
-  if (prop === 'width' && !oldV && /^\d+(\.\d+)?px$/.test(String(newV))) return true
-
-  // Анимации hero / скролл / glow карточек — не layout
-  if (prop.startsWith('--hero-')) return true
-  if (['--active', '--start', '--glow-mask'].includes(prop)) return true
-  if ((m.selector ?? '').includes('scroll-progress')) return true
-  if ((m.selector ?? '').includes('hero-dual-portrait')) return true
-
-  return false
-}
-
-function isNoise(m) {
-  if (NOISE_SELECTORS.some(r => r.test(m.selector ?? ''))) return true
-  if (m.type === 'style' && NOISE_CSS_PROPS.some(r => r.test(m.property ?? ''))) return true
-  if (m.type === 'style' && isNoiseStyle(m)) return true
-  if (m.type === 'text' && m.oldValue === null) {
-    if (!m.newValue || m.newValue.trim().length > 150) return true
-  }
-  if (m.type === 'attribute' && m.attribute === 'contenteditable') return true
-  if (m.type === 'attribute' && m.attribute === 'class') {
-    const addedClasses = (m.newValue ?? '').split(/\s+/).filter(c => c && !((m.oldValue ?? '').split(/\s+/).includes(c)))
-    const removedClasses = (m.oldValue ?? '').split(/\s+/).filter(c => c && !((m.newValue ?? '').split(/\s+/).includes(c)))
-    const delta = [...addedClasses, ...removedClasses]
-    if (delta.length === 0) return true
-    if (delta.every(cls => NOISE_CLASSES.some(r => r.test(cls)))) return true
-  }
-  if (m.type === 'node-added' || m.type === 'node-removed') return true
-  return false
-}
-
-// ─── Parse ────────────────────────────────────────────────────────────────────
-
 export function parseMutationsToChanges(mutations) {
   const result = []
 
   for (const m of mutations) {
-    if (isNoise(m)) continue
-
     const key = buildKey(m)
 
     if (seen.has(key)) {
