@@ -28,9 +28,14 @@ export function getAgentCandidatePaths() {
 
   const paths = [
     join(home, '.local', 'bin', win ? 'agent.exe' : 'agent'),
+    join(home, '.local', 'bin', win ? 'agent.cmd' : 'agent'),
     join(home, '.cursor', 'bin', win ? 'agent.exe' : 'agent'),
+    join(home, '.cursor', 'bin', win ? 'agent.cmd' : 'agent'),
+    join(localAppData, 'cursor-agent', win ? 'agent.cmd' : 'agent'),
+    join(localAppData, 'cursor-agent', win ? 'cursor-agent.cmd' : 'cursor-agent'),
     join(localAppData, 'cursor-agent', win ? 'agent.exe' : 'agent'),
     join(localAppData, 'Programs', 'cursor-agent', win ? 'agent.exe' : 'agent'),
+    join(localAppData, 'Programs', 'cursor-agent', win ? 'agent.cmd' : 'agent'),
   ]
 
   if (win) {
