@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      padding: 20px 18px 18px;
+      width: 280px;
+      background: #0d0d1a;
+      color: #fff;
+      margin: 0;
+    }
+    h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0 0 14px;
+      letter-spacing: 0.02em;
+    }
+    .dot {
+      display: inline-block;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #444;
+      margin-right: 8px;
+      vertical-align: middle;
+      flex-shrink: 0;
+    }
+    .dot.on  { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+    .dot.off { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+    #status { font-size: 13px; font-weight: 600; vertical-align: middle; }
+    #count  { font-size: 12px; color: #888; margin: 6px 0 14px; }
+    button {
+      display: block;
+      margin-top: 10px;
+      width: 100%;
+      padding: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      color: #fff;
+      background: transparent;
+      border-radius: 6px;
+      transition: box-shadow 0.2s, opacity 0.2s;
+      letter-spacing: 0.01em;
+    }
+    button:disabled {
+      opacity: 0.25 !important;
+      cursor: default;
+      box-shadow: none !important;
+    }
+    #copy-btn {
+      border: 1.5px solid #38bdf8;
+      box-shadow: 0 0 10px #38bdf880, inset 0 0 10px #38bdf820;
+    }
+    #copy-btn:not(:disabled):hover {
+      box-shadow: 0 0 18px #38bdf8cc, inset 0 0 14px #38bdf840;
+    }
+    #copy-btn.copied {
+      border-color: #22c55e;
+      box-shadow: 0 0 10px #22c55e80, inset 0 0 10px #22c55e20;
+    }
+    #clear-btn {
+      border: 1.5px solid #f87171;
+      box-shadow: 0 0 10px #f8717180, inset 0 0 10px #f8717120;
+    }
+    #clear-btn:not(:disabled):hover {
+      box-shadow: 0 0 18px #f87171cc, inset 0 0 14px #f8717140;
+    }
+  </style>
+</head>
+<body>
+  <h2>VisBug MCP Bridge</h2>
+  <div>
+    <span class="dot" id="dot"></span>
+    <span id="status">Подключение…</span>
+  </div>
+  <p id="count"></p>
+<button id="copy-btn" disabled>Скопировать правки</button>
+  <button id="clear-btn" disabled>Очистить правки</button>
+  <script src="popup.js"></script>
+</body>
+</html>

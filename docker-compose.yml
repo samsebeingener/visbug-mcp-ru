@@ -1,0 +1,9 @@
+services:
+  visbug-mcp:
+    build: .
+    container_name: visbug-mcp
+    ports:
+      - "4844:4844"   # WebSocket — content-script → serveur
+    restart: unless-stopped
+    stdin_open: true
+    tty: false
