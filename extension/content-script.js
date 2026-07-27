@@ -1,13 +1,18 @@
 /**
- * visbug-mcp — content-script.js
+ * visbug-mcp — content-script.js (режим «Запись» по умолчанию)
  */
 
 const WS_URL = 'ws://127.0.0.1:4844'
 const RECONNECT_DELAY = 2000
-const VISBUG_ATTR = ['style', 'class', 'src', 'href', 'alt', 'title', 'contenteditable']
+const LIVE_OBSERVER_ENABLED = false
+
+const { captureSnapshot, diffSnapshots, getDefaultSnapshotRoot } = globalThis.VisbugMcpSnapshot
 
 let socket = null
 let connected = false
+let recordingBefore = null
+let recordingRootSelector = null
+let snapshotScopeRoot = null
 
 function connect() {
   socket = new WebSocket(WS_URL)
@@ -21,10 +26,17 @@ function connect() {
     try {
       const msg = JSON.parse(e.data)
       if (msg.event === 'clear-visbug-storage') {
-        const removed = Object.keys(localStorage)
-          .filter(k => /visbug|vis-bug/i.test(k))
+        recordingBefore = null
+        recordingRootSelector = null
+        snapshotScopeRoot = null
+        const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
         removed.forEach(k => localStorage.removeItem(k))
-        console.debug(`[visbug-mcp] localStorage cleared (${removed.length} key(s))`)
+      }
+      if (msg.event === 'recording-capture-before') {
+        startRecordingSnapshot()
+      }
+      if (msg.event === 'recording-capture-after') {
+        finishRecordingSnapshot()
       }
     } catch {}
   })
@@ -41,7 +53,6 @@ function send(payload) {
   if (connected && socket.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify(payload))
   }
-  // Mutations pré-connexion ignorées — ce sont des artifacts de rendu page, pas des changements VisBug
 }
 
 function getSelector(el) {
@@ -70,6 +81,56 @@ function getSelector(el) {
     return 'body'
   }
 }
+
+function resolveSnapshotRoot() {
+  if (snapshotScopeRoot?.isConnected) return snapshotScopeRoot
+  return getDefaultSnapshotRoot(document)
+}
+
+function startRecordingSnapshot() {
+  const root = resolveSnapshotRoot()
+  recordingRootSelector = getSelector(root)
+  recordingBefore = captureSnapshot(root, getSelector)
+  send({
+    event: 'recording-started',
+    url: location.href,
+    rootSelector: recordingRootSelector,
+    elementCount: recordingBefore.length,
+  })
+  console.debug('[visbug-mcp] snapshot before:', recordingRootSelector, recordingBefore.length, 'elements')
+}
+
+function finishRecordingSnapshot() {
+  if (!recordingBefore) {
+    send({ event: 'recording-error', url: location.href, message: 'Снимок «до» не найден. Нажмите «Начать запись» ещё раз.' })
+    return
+  }
+
+  const root = resolveSnapshotRoot()
+  const after = captureSnapshot(root, getSelector)
+  const changes = diffSnapshots(recordingBefore, after, { url: location.href })
+
+  send({
+    event: 'recording-result',
+    url: location.href,
+    rootSelector: recordingRootSelector,
+    changes,
+  })
+
+  recordingBefore = null
+  console.debug('[visbug-mcp] snapshot diff:', changes.length, 'changes')
+}
+
+document.addEventListener('click', (e) => {
+  const target = e.target
+  if (!(target instanceof Element)) return
+  if (target.closest('vis-bug')) return
+  snapshotScopeRoot = target.closest('main, section, [id], article') ?? target
+}, true)
+
+// ─── Live observer (опционально, выключен по умолчанию) ─────────────────────
+
+const VISBUG_ATTR = ['style', 'class', 'src', 'href', 'alt', 'title', 'contenteditable']
 
 function parseCSSChanges(oldStyle, newStyle) {
   const parse = s => {
@@ -117,31 +178,6 @@ function parseMutation(record) {
       tag: el.parentElement?.tagName.toLowerCase(), timestamp }]
   }
 
-  if (record.type === 'childList') {
-    const mutations = []
-    // Detect text edits: one text node removed + one text node added on the same parent
-    const removedTexts = [...record.removedNodes].filter(n => n.nodeType === Node.TEXT_NODE)
-    const addedTexts = [...record.addedNodes].filter(n => n.nodeType === Node.TEXT_NODE)
-    if (removedTexts.length > 0 || addedTexts.length > 0) {
-      const oldValue = removedTexts.map(n => n.textContent).join('') || null
-      const newValue = addedTexts.map(n => n.textContent).join('') ||
-        (el.nodeType === Node.ELEMENT_NODE ? el.textContent : null)
-      if (oldValue !== newValue)
-        mutations.push({ type: 'text', selector, oldValue, newValue,
-          tag: el.tagName?.toLowerCase(), timestamp })
-    }
-    record.addedNodes.forEach(node => {
-      if (node.nodeType === Node.ELEMENT_NODE)
-        mutations.push({ type: 'node-added', selector: getSelector(node),
-          parentSelector: selector, html: node.outerHTML?.slice(0, 300), timestamp })
-    })
-    record.removedNodes.forEach(node => {
-      if (node.nodeType === Node.ELEMENT_NODE)
-        mutations.push({ type: 'node-removed', selector, tag: node.tagName?.toLowerCase(), timestamp })
-    })
-    return mutations
-  }
-
   return []
 }
 
@@ -150,23 +186,25 @@ function isVisBugInternal(record) {
   return tag?.startsWith('vis-') || tag?.startsWith('visbug') || tag?.startsWith('eye-') || tag === 'visbug'
 }
 
-const observer = new MutationObserver(records => {
-  const mutations = []
-  records.forEach(record => {
-    if (isVisBugInternal(record)) return
-    if (record.type === 'attributes' && !VISBUG_ATTR.includes(record.attributeName)) return
-    mutations.push(...parseMutation(record))
+if (LIVE_OBSERVER_ENABLED) {
+  const observer = new MutationObserver(records => {
+    const mutations = []
+    records.forEach(record => {
+      if (isVisBugInternal(record)) return
+      if (record.type === 'attributes' && !VISBUG_ATTR.includes(record.attributeName)) return
+      mutations.push(...parseMutation(record))
+    })
+    if (mutations.length === 0) return
+    send({ event: 'mutations', url: location.href, mutations })
   })
-  if (mutations.length === 0) return
-  send({ event: 'mutations', url: location.href, mutations })
-})
 
-observer.observe(document.documentElement, {
-  attributes: true, attributeOldValue: true,
-  characterData: true, characterDataOldValue: true,
-  childList: true, subtree: true,
-  attributeFilter: VISBUG_ATTR,
-})
+  observer.observe(document.documentElement, {
+    attributes: true, attributeOldValue: true,
+    characterData: true, characterDataOldValue: true,
+    childList: true, subtree: true,
+    attributeFilter: VISBUG_ATTR,
+  })
+}
 
 connect()
-console.debug('[visbug-mcp] observer started on', location.href)
+console.debug('[visbug-mcp] режим «Запись» (snapshot), live observer:', LIVE_OBSERVER_ENABLED)

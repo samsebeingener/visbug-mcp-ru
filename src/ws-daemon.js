@@ -1,6 +1,6 @@
 /**
  * ws-daemon.js — фоновый WebSocket-сервер (127.0.0.1:4844).
- * Принимает мутации от расширения Chrome. MCP — отдельно в server.js.
+ * Режим по умолчанию: «Запись» (snapshot до/после).
  */
 
 import { WebSocketServer } from 'ws'
@@ -13,11 +13,10 @@ import { join } from 'path'
 const STORE_DIR = join(homedir(), '.visbug-mcp')
 const STORE_FILE = join(STORE_DIR, 'changes.json')
 const WS_PORT = 4844
-const STARTUP_GRACE_MS = 2000
-
-// ─── Store ────────────────────────────────────────────────────────────────────
+const LIVE_MUTATIONS_ENABLED = false
 
 const store = { changes: [] }
+let recordingActive = false
 
 function loadStore() {
   try {
@@ -44,13 +43,11 @@ function syncFromFile() {
   try {
     const data = JSON.parse(readFileSync(STORE_FILE, 'utf8'))
     const fileChanges = data.changes ?? []
-    // Le fichier a été modifié externellement (MCP apply/clear)
     if (fileChanges.length !== store.changes.length) {
       store.changes = fileChanges
       clearSeen()
       restoreSeen(store.changes)
     } else {
-      // Synchroniser les flags applied (MCP apply_changes)
       for (let i = 0; i < fileChanges.length; i++) {
         if (fileChanges[i].applied) store.changes[i].applied = true
       }
@@ -58,9 +55,27 @@ function syncFromFile() {
   } catch {}
 }
 
-loadStore()
+function setChangesFromRecording(changes) {
+  store.changes = changes
+  clearSeen()
+  restoreSeen(store.changes)
+  saveStore()
+}
 
-// ─── WebSocket ────────────────────────────────────────────────────────────────
+function sendStats(ws) {
+  syncFromFile()
+  const pending = store.changes.filter(c => !c.applied)
+  const changesText = pending.length === 0 ? '' : formatChangesFromStore(store.changes)
+  ws.send(JSON.stringify({
+    event: 'stats',
+    total: pending.length,
+    changesText,
+    recording: recordingActive,
+    mode: 'record',
+  }))
+}
+
+loadStore()
 
 function freePort(port) {
   try {
@@ -69,7 +84,6 @@ function freePort(port) {
       pids.split('\n').filter(Boolean).forEach(pid => {
         try { execSync(`kill ${pid}`) } catch {}
       })
-      process.stderr.write(`[ws-daemon] freed port ${port} (killed: ${pids.replace(/\n/g, ' ')})\n`)
     }
   } catch {}
 }
@@ -79,7 +93,7 @@ freePort(WS_PORT)
 const wss = new WebSocketServer({ port: WS_PORT })
 
 wss.on('listening', () => {
-  process.stderr.write(`[ws-daemon] WebSocket listening on ws://127.0.0.1:${WS_PORT}\n`)
+  process.stderr.write(`[ws-daemon] WebSocket ws://127.0.0.1:${WS_PORT} (режим: запись/snapshot)\n`)
 })
 
 wss.on('error', (err) => {
@@ -94,32 +108,48 @@ function broadcast(payload) {
 }
 
 wss.on('connection', (ws) => {
-  let ignoreUntil = Date.now() + STARTUP_GRACE_MS
-
   ws.on('message', (raw) => {
     try {
       const msg = JSON.parse(raw.toString())
 
-      if (msg.event === 'mutations') {
-        if (Date.now() < ignoreUntil) return // ignore page-load noise
+      if (msg.event === 'mutations' && LIVE_MUTATIONS_ENABLED) {
         const parsed = parseMutationsToChanges(msg.mutations)
         store.changes.push(...parsed)
         if (parsed.length > 0) saveStore()
       }
 
       if (msg.event === 'popup-ping') {
-        syncFromFile()
-        const pending = store.changes.filter(c => !c.applied)
-        const changesText = pending.length === 0 ? '' : formatChangesFromStore(store.changes)
-        ws.send(JSON.stringify({ event: 'stats', total: pending.length, changesText }))
+        sendStats(ws)
       }
 
-      if (msg.event === 'popup-start-recording') {
-        ignoreUntil = 0
-        ws.send(JSON.stringify({ event: 'recording-started' }))
+      if (msg.event === 'popup-recording-start') {
+        recordingActive = true
+        broadcast({ event: 'recording-capture-before' })
+        ws.send(JSON.stringify({ event: 'recording-armed' }))
+      }
+
+      if (msg.event === 'popup-recording-stop') {
+        broadcast({ event: 'recording-capture-after' })
+      }
+
+      if (msg.event === 'recording-started') {
+        process.stderr.write(`[ws-daemon] запись: snapshot «до» (${msg.elementCount} элементов, ${msg.rootSelector})\n`)
+      }
+
+      if (msg.event === 'recording-result') {
+        recordingActive = false
+        setChangesFromRecording(msg.changes ?? [])
+        process.stderr.write(`[ws-daemon] запись: ${msg.changes?.length ?? 0} правок после diff\n`)
+        broadcast({ event: 'recording-finished', total: msg.changes?.length ?? 0 })
+      }
+
+      if (msg.event === 'recording-error') {
+        recordingActive = false
+        ws.send(JSON.stringify({ event: 'recording-error', message: msg.message }))
       }
 
       if (msg.event === 'popup-clear') {
+        recordingActive = false
         store.changes = []
         clearSeen()
         saveStore()
