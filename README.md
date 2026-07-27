@@ -47,7 +47,7 @@ Chrome (VisBug + расширение)
 ### 1. Зависимости
 
 ```bash
-git clone https://github.com/mashajetruj-sketch/visbug-mcp-ru.git
+git clone https://github.com/samsebeingener/visbug-mcp-ru.git
 cd visbug-mcp-ru
 npm install
 ```

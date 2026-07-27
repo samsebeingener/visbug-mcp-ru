@@ -6,7 +6,7 @@
   "author": "Nikita Kulikov <https://samsebeingener.ru>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mashajetruj-sketch/visbug-mcp-ru.git"
+    "url": "https://github.com/samsebeingener/visbug-mcp-ru.git"
   },
   "homepage": "https://samsebeingener.ru",
   "main": "src/server.js",
