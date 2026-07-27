@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/cover-portrait.png" alt="Никита Куликов" width="420">
+  <img src="assets/cover-banner.png" alt="VisBug MCP Bridge — обложка репозитория" width="920">
 </p>
 
 <h1 align="center">VisBug MCP Bridge</h1>
@@ -224,8 +224,8 @@ echo '{"changes":[]}' > ~/.visbug-mcp/changes.json
 ```
 visbug-mcp-ru/
 ├── assets/
-│   ├── cover-portrait.png   # обложка README
-│   └── social-preview.jpg   # превью для соцсетей
+│   ├── cover-banner.png     # обложка README
+│   └── social-preview.jpg   # превью при шаринге (копия баннера)
 ├── src/
 │   ├── ws-daemon.js         # WebSocket-демон (фон)
 │   ├── server.js            # MCP stdio (Cursor)
