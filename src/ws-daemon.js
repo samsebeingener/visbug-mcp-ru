@@ -206,16 +206,35 @@ wss.on('connection', (ws) => {
         broadcast({ event: 'recording-finished', total })
         handlePostRecording({ total, url: msg.url }, store.changes).then((result) => {
           saveStore()
-          if (result.action === 'auto-applied' || result.action === 'auto-applied-partial') {
+          if (result.action === 'auto-applied') {
             broadcast({
               event: 'auto-applied',
               applied: result.applied,
               skipped: result.skipped,
               files: result.files,
-              remaining: result.remaining ?? 0,
+              remaining: 0,
+            })
+          } else if (result.action === 'auto-applied-partial') {
+            broadcast({
+              event: 'apply-incomplete',
+              applied: result.applied,
+              remaining: result.remaining,
+              message: `В файлы: ${result.applied}. Не применено: ${result.remaining} (текст CMS? → /visbug-apply)`,
             })
           } else if (result.spawned) {
-            broadcast({ event: 'auto-agent-started', workspace: result.workspace, total: result.remaining ?? total })
+            broadcast({
+              event: 'auto-agent-started',
+              workspace: result.workspace,
+              total: result.remaining ?? total,
+              message: 'Агент обрабатывает остаток в фоне…',
+            })
+          } else if (result.action === 'failed') {
+            broadcast({
+              event: 'apply-incomplete',
+              applied: result.applied ?? 0,
+              remaining: result.remaining ?? total,
+              message: `Не применено: ${result.remaining ?? total}. Открой Cursor → /visbug-apply`,
+            })
           } else if (result.action !== 'disabled') {
             broadcast({ event: 'auto-agent-skipped', reason: result.reason ?? result.agentReason, total })
           }

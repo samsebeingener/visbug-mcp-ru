@@ -86,6 +86,39 @@ export const VISBUG_ARTIFACT_PROPERTIES = new Set([
   'transition-property',
 ])
 
+/** Не переносить в CSS через auto-apply (эффекты карточек, glow, inline-переменные). */
+export const AUTO_APPLY_BLOCKED_PROPERTIES = new Set([
+  ...VISBUG_ARTIFACT_PROPERTIES,
+])
+
+/** Только эти свойства auto-apply пишет сам; остальное — только через LLM. */
+export const AUTO_APPLY_SAFE_PROPERTIES = new Set([
+  'margin-inline-start',
+  'margin-top',
+  'margin-left',
+  'margin-right',
+  'margin-bottom',
+  'font-size',
+  'color',
+  'padding',
+  'padding-top',
+  'padding-bottom',
+  'padding-left',
+  'padding-right',
+  'gap',
+  'row-gap',
+  'column-gap',
+  'width',
+  'max-width',
+  'min-width',
+  'height',
+  'line-height',
+  'letter-spacing',
+])
+
+const AUTO_APPLY_BLOCKED_SELECTOR_RE =
+  /editorial-card-glow|pointer-events-none|vibe-annotations|visbug-mcp-guides/i
+
 const VISBUG_SECTION_IDS = new Set([
   'vibe-annotations-root',
   'visbug-mcp-guides-root',

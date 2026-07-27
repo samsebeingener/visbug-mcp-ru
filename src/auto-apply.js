@@ -8,6 +8,8 @@ import {
   getApplyHints,
   isVisbugArtifactProperty,
   isGridLayoutContext,
+  AUTO_APPLY_SAFE_PROPERTIES,
+  AUTO_APPLY_BLOCKED_SELECTOR_RE,
 } from './parser.js'
 import { getStoreDir } from './config.js'
 
@@ -46,12 +48,22 @@ function normalizeSelector(selector) {
 function mapProperty(change) {
   const prop = change.property
   if (!prop) return null
+  if (prop.startsWith('--')) return null
   if (isVisbugArtifactProperty(prop)) return null
 
   if ((prop === 'left' || prop === 'top') && isGridLayoutContext(change.selector ?? '')) {
-    return prop === 'left' ? 'margin-inline-start' : 'margin-top'
+    const mapped = prop === 'left' ? 'margin-inline-start' : 'margin-top'
+    return mapped
   }
-  return prop
+
+  if (AUTO_APPLY_SAFE_PROPERTIES.has(prop)) return prop
+  return null
+}
+
+function isAutoApplySelector(selector) {
+  if (!selector || selector.length > 200) return false
+  if (AUTO_APPLY_BLOCKED_SELECTOR_RE.test(selector)) return false
+  return true
 }
 
 function formatCssValue(prop, value) {
@@ -181,6 +193,12 @@ export function autoApplyWorkspace(workspace, changes) {
     const prop = mapProperty(change)
     if (!prop) {
       skipped++
+      continue
+    }
+
+    if (!isAutoApplySelector(change.selector ?? '')) {
+      skipped++
+      log(`style skip selector ${change.selector?.slice(0, 60)}…`)
       continue
     }
 

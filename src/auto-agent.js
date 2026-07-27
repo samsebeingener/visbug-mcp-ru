@@ -76,7 +76,7 @@ export async function handlePostRecording(meta = {}, changes = []) {
     return { action: 'auto-applied', spawned: false, ...applyResult, remaining: 0 }
   }
 
-  const agentResult = await maybeSpawnAutoAgent({ ...meta, total: remaining })
+  const agentResult = await maybeSpawnAutoAgent({ ...meta, total: remaining }, changes)
   if (agentResult.spawned) {
     return { action: 'agent-spawned', ...applyResult, remaining, ...agentResult }
   }
@@ -96,8 +96,9 @@ export async function handlePostRecording(meta = {}, changes = []) {
 
 /**
  * @param {{ total: number, url?: string }} meta
+ * @param {object[]} [changes]
  */
-export async function maybeSpawnAutoAgent(meta = {}) {
+export async function maybeSpawnAutoAgent(meta = {}, changes = []) {
   const config = loadConfig()
   if (!config.autoAgent?.enabled) {
     return { spawned: false, reason: 'auto-agent disabled' }
@@ -150,6 +151,7 @@ export async function maybeSpawnAutoAgent(meta = {}) {
     shell: true,
     detached: true,
     stdio: 'ignore',
+    windowsHide: true,
     env: { ...process.env },
   })
 
@@ -160,7 +162,11 @@ export async function maybeSpawnAutoAgent(meta = {}) {
 
   child.on('close', (code) => {
     agentRunning = false
-    log(`agent exit code=${code ?? '?'} workspace=${workspace}`)
+    const stillPending = changes.filter((c) => !c.applied).length
+    log(`agent exit code=${code ?? '?'} workspace=${workspace} pending=${stillPending}`)
+    if (stillPending > 0) {
+      log(`agent не применил ${stillPending} правок — используйте /visbug-apply в Cursor`)
+    }
   })
 
   child.unref()

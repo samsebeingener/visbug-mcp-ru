@@ -109,6 +109,10 @@ ws.onmessage = (e) => {
     if (data.event === 'health') {
       renderHealth(data)
     }
+    if (data.event === 'auto-applied-partial' || data.event === 'apply-incomplete') {
+      statusEl.textContent = data.message
+        || `Частично: ${data.applied ?? 0} в файлы; не применено: ${data.remaining ?? '?'}. /visbug-apply в Cursor`
+    }
     if (data.event === 'auto-applied') {
       const files = (data.files ?? []).length ? ` → ${data.files.join(', ')}` : ''
       statusEl.textContent = data.remaining
@@ -116,7 +120,7 @@ ws.onmessage = (e) => {
         : `Готово: ${data.applied} правок в файлы${files}`
     }
     if (data.event === 'auto-agent-started') {
-      statusEl.textContent = `Auto-agent запущен (${data.total} правок)`
+      statusEl.textContent = data.message || `Агент обрабатывает ${data.total} правок…`
     }
     if (data.event === 'auto-agent-skipped') {
       statusEl.textContent = `Запись OK; auto-agent: ${data.reason}`
