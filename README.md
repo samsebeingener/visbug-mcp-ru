@@ -85,14 +85,25 @@ pm2 save
 
 Демон слушает `ws://127.0.0.1:4844` и перезапускается при сбое.
 
-### 3. Расширение Chrome
+### 3. Расширения Chrome
 
-1. Откройте `chrome://extensions`
+**VisBug (официальный):**  
+https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc
+
+**visbug-mcp (наше):**
+
+1. В адресной строке Chrome откройте: `chrome://extensions`
 2. Включите **режим разработчика** (переключатель справа вверху)
-3. Нажмите **«Загрузить распакованное расширение»**
-4. Выберите папку `extension/`
+3. **«Загрузить распакованное расширение»**
+4. Выберите папку **`extension/`** внутри клона репозитория
 
-Иконка в панели Chrome открывает popup со статусом подключения к демону.
+Полный путь печатает `npm run setup`, пример:
+
+```
+C:\Users\you\projects\visbug-mcp-ru\extension
+```
+
+Не ищите папку по всему диску — скопируйте путь из терминала после setup или из popup visbug-mcp.
 
 ### 4. MCP в Cursor
 
