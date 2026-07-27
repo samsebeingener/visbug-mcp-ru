@@ -1,6 +1,6 @@
 {
   "name": "visbug-mcp-ru",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "description": "Локальный MCP-мост VisBug → Cursor: захват DOM-правок на localhost",
   "author": "Nikita Kulikov <https://samsebeingener.ru>",

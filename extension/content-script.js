@@ -12,6 +12,7 @@ const RECONNECT_DELAY = 2000
 const LIVE_OBSERVER_ENABLED = false
 
 const snap = () => globalThis.VisbugMcpSnapshot
+const guides = () => globalThis.VisbugMcpAlignmentGuides
 
 let socket = null
 let connected = false
@@ -34,6 +35,7 @@ function connect() {
         recordingBefore = null
         recordingRootSelector = null
         recordingScopeRoot = null
+        guides()?.stop()
         const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
         removed.forEach(k => localStorage.removeItem(k))
       }
@@ -98,6 +100,7 @@ function startRecordingSnapshot() {
   const root = recordingScopeRoot
   recordingRootSelector = getSelector(root)
   recordingBefore = snap().captureSnapshot(root, getSelector)
+  guides()?.start(recordingScopeRoot)
   send({
     event: 'recording-started',
     url: location.href,
@@ -109,6 +112,7 @@ function startRecordingSnapshot() {
 
 function finishRecordingSnapshot() {
   if (!recordingBefore) {
+    guides()?.stop()
     send({ event: 'recording-error', url: location.href, message: 'Снимок «до» не найден. Нажмите «Начать запись» ещё раз.' })
     return
   }
@@ -129,6 +133,7 @@ function finishRecordingSnapshot() {
 
       recordingBefore = null
       recordingScopeRoot = null
+      guides()?.stop()
       console.debug('[visbug-mcp] snapshot diff:', changes.length, 'changes', changes)
     })
   })
