@@ -14,6 +14,7 @@ import { fileURLToPath } from 'url'
 import { saveConfig, loadConfig } from '../src/config.js'
 import { ensureAgentCli } from './ensure-agent-cli.mjs'
 import { normalizeOrigin } from '../src/projects.js'
+import { describeProjectInstrumentation, enrichProjectRegistration } from '../src/wire-project.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '..')
@@ -128,12 +129,14 @@ async function main() {
   const previous = loadConfig()
   const projects = Array.isArray(previous.projects) ? [...previous.projects] : []
   if (workspace && origin) {
-    const project = {
+    const project = enrichProjectRegistration({
       id: workspace,
       name: projectName || workspace.split(/[\\/]/).filter(Boolean).pop(),
       workspace,
       origins: [origin],
-    }
+    }, workspace)
+    const instr = describeProjectInstrumentation(workspace)
+    console.log(`\n📎 Привязка к коду: ${instr.userMessage}\n`)
     const existingIndex = projects.findIndex((item) => item.workspace === workspace || item.origins?.includes(origin))
     if (existingIndex >= 0) projects[existingIndex] = project
     else projects.push(project)

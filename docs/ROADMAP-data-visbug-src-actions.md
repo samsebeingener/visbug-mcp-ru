@@ -119,67 +119,39 @@
 
 ---
 
-## Фаза 2 — `data-visbug-src` dev-only (1–2 недели)
+## Фаза 2 — `data-visbug-src` (zero-config)
 
-### Зачем
+### Принцип для пользователя
 
-Точный адрес в коде без угадывания селектора — как `data-onlook-id` у Onlook.
+| Что ставит пользователь | Что делает Bridge |
+|-------------------------|-------------------|
+| VisBug (Chrome) | — |
+| Расширение `visbug-mcp-ru` | `react-source-bridge.js` → `data-visbug-src` в **dev** |
+| `npm run setup` / `/visbug-mcp-start` | Только `workspace` + `origin` в config |
 
-### Формат атрибута
+**Код сайта не меняется.** Babel-плагин в `instrument/` — запасной путь для CI/без React `_debugSource`, не для onboarding.
 
-```html
-<p
-  data-visbug-src="src/components/sections/pricing.tsx:59:17"
-  data-visbug-oid="p_8f3a2c"
->
-```
+### Как работает (extension-runtime)
 
-- **`data-visbug-src`** — `relativePath:startLine:startColumn` (от корня workspace)
-- **`data-visbug-oid`** — стабильный id узла в файле (для повторных правок после HMR)
-- Только **dev** (`NODE_ENV=development`), strip в production build
+1. «Начать запись» → расширение обходит DOM, читает React `_debugSource` (только `npm run dev`).
+2. Ставит `data-visbug-src="src/.../Component.tsx:line:col"` на элементы.
+3. Snapshot/diff → Actions → auto-apply знает файл (Фаза 3: писать в TSX).
 
-### Варианты внедрения
+### Задачи (осталось)
 
-| Вариант | Плюсы | Минусы |
-|---------|-------|--------|
-| **A. Next.js/SWC plugin** | Точно, на все JSX | Нужен webpack/turbopack hook |
-| **B. Babel plugin** (как Onlook `ids.ts`) | Проверенный паттерн | Дубли с SWC в Next 15+ |
-| **C. React `__source` / `_debugSource`** | Без плагина | Нестабильно, не в prod |
-| **D. Runtime preload script** | Быстрый spike | Пишет в DOM, не в исходники |
-
-**Рекомендация:** A для `samsebeingener-web/frontend-new`, D как fallback для static HTML.
-
-### Пакет `packages/visbug-instrument` (в monorepo или подпапка)
-
-```
-visbug-instrument/
-  babel-plugin-visbug-src.js   # dev: inject attrs
-  next-plugin.js               # wrap with @next/bundle-analyzer pattern
-  strip-plugin.js              # prod: remove attrs
-```
-
-### Интеграция в visbug-mcp-ru
-
-1. **Extension** — при записи читать `el.closest('[data-visbug-src]')` → класть в `action.target.visbugSrc`
-2. **auto-apply** — если `visbugSrc` есть:
-   - парсить path → открыть файл;
-   - **Фаза 2a:** писать в `sections.css` с комментарием `/* visbug-src: ... */` (быстрый win);
-   - **Фаза 3:** AST → className / inline style в TSX
-3. **Fallback** — без атрибута → текущие эвристики (`simplifySelectorForApply`)
+1. ~~`extension/react-source-bridge.js`~~ ✅
+2. ~~`setup` / `visbug-mcp-start` — zero-config policy~~ ✅
+3. **auto-apply**: при `visbugSrc` → открыть файл из workspace (v0.7.2)
+4. Опционально: babel plugin только по `VISBUG_INSTRUMENT=babel` (не в setup по умолчанию)
 
 ### Пилот
 
-- Проект: `projects/samsebeingener-web/frontend-new`
-- Секции: `#services`, `#method`, hero
-- Opt-in: `visbug: { instrument: true }` в `next.config.ts`
-
-### Критерий готовности
-
-- В DevTools у `<p>` в pricing виден `data-visbug-src`
-- Move в VisBug → auto-apply пишет в правильный файл (лог: `visbug-src hit`)
-- Production build без атрибутов (grep = 0)
+- Проект: `frontend-new` — **без** правок next.config
+- Проверка: DevTools → у `<p>` после «Начать запись» есть `data-visbug-src`
 
 ---
+
+## Фаза 2 (legacy) — Babel/SWC plugin (опционально, не onboarding)
 
 ## Фаза 3 — AST apply в исходники (2–3 недели)
 

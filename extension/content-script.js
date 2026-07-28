@@ -12,6 +12,7 @@ const RECONNECT_DELAY = 2000
 const LIVE_OBSERVER_ENABLED = false // с v0.2.0 основной режим — snapshot по кнопке «Начать/Стоп»
 
 const snap = () => globalThis.VisbugMcpSnapshot
+const reactSrc = () => globalThis.VisbugMcpReactSourceBridge
 const guides = () => globalThis.VisbugMcpAlignmentGuides
 const badge = () => globalThis.VisbugMcpRecordingBadge
 const textWatch = () => globalThis.VisbugMcpRecordingTextWatch
@@ -148,6 +149,10 @@ function startRecordingSnapshot() {
 
   recordingScopeRoot = snap().getDefaultSnapshotRoot(document)
   const root = recordingScopeRoot
+  const bridgeStats = reactSrc()?.annotateRecordingRoot?.(root)
+  if (bridgeStats?.annotated) {
+    console.debug('[visbug-mcp] react-source-bridge:', bridgeStats.annotated, 'elements tagged')
+  }
   globalThis.__visbugMcpRecordingActive = true
   globalThis.__visbugMcpRecordingRoot = root
   recordingRootSelector = getSelector(root)
@@ -182,6 +187,7 @@ function finishRecordingSnapshot() {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       const root = recordingScopeRoot ?? snap().getDefaultSnapshotRoot(document)
+      reactSrc()?.annotateRecordingRoot?.(root)
       const after = snap().captureSnapshot(root, getSelector)
       const snapshotChanges = snap().diffSnapshots(recordingBefore, after, { url: location.href })
       const watchedText = textWatch()?.drainChanges?.() ?? []

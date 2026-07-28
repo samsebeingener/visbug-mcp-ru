@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VisBug MCP Bridge (RU)",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Передаёт правки VisBug в локальный Bridge для auto-apply и Cursor Agent",
   "permissions": ["activeTab", "storage"],
   "content_scripts": [
@@ -12,7 +12,7 @@
         "https://localhost:*/*",
         "https://127.0.0.1:*/*"
       ],
-      "js": ["snapshot.js", "alignment-guides.js", "visbug-ui-trim.js", "recording-badge.js", "recording-text-watch.js", "content-script.js"],
+      "js": ["snapshot.js", "react-source-bridge.js", "alignment-guides.js", "visbug-ui-trim.js", "recording-badge.js", "recording-text-watch.js", "content-script.js"],
       "run_at": "document_idle"
     }
   ],
