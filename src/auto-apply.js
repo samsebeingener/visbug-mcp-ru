@@ -25,6 +25,7 @@ import {
   resolveApplySelectorWithVisbug,
   pickCssTargetForVisbug,
 } from './visbug-src.js'
+import { canTryAstMoveApply, resolveMoveTargetPx, tryApplyMoveAst } from './ast-apply.js'
 
 const CSS_EXT = new Set(['.css', '.scss'])
 
@@ -745,22 +746,56 @@ export function autoApplyWorkspace(workspace, changes) {
         continue
       }
 
-      const wrote = writeStyleDecl(target, applySelector, plan.prop, plan.value)
+      let wrote = false
+      let writeFile = target.path
+      let writeNote = ''
+
+      if (canTryAstMoveApply(change, plan, layout)) {
+        const targetPx = resolveMoveTargetPx(
+          workspace,
+          change,
+          plan,
+          applySelector,
+          target,
+          leftChange,
+          topChange,
+        )
+        const astPlan = Number.isFinite(targetPx)
+          ? { ...plan, value: formatLength(targetPx) }
+          : plan
+        const ast = tryApplyMoveAst(workspace, change, astPlan)
+        if (ast.ok) {
+          wrote = true
+          writeFile = ast.file
+          writeNote = ' [ast className]'
+          log(`style OK ${plan.prop}=${astPlan.value} (className) → ${ast.file}`)
+        } else {
+          log(`ast skip ${ast.reason} → CSS fallback`)
+        }
+      }
+
+      if (!wrote) {
+        wrote = writeStyleDecl(target, applySelector, plan.prop, plan.value)
+        writeNote = plan.reason ? ` [${plan.reason}]` : ''
+      }
+
       if (wrote) {
         if (leftChange) leftChange.applied = true
         if (topChange) topChange.applied = true
         applied += (leftChange ? 1 : 0) + (topChange ? 1 : 0)
-        files.add(target.path)
+        files.add(writeFile)
         writes.push({
           type: 'style',
           selector: applySelector,
           prop: plan.prop,
           value: plan.value,
-          file: target.path,
+          file: writeFile,
         })
         const note = applySelector !== change.selector ? ` (${applySelector})` : ''
-        const why = plan.reason ? ` [${plan.reason}]` : ''
-        log(`style OK ${plan.prop}=${plan.value}${note}${why} → ${target.path}`)
+        if (!writeNote.includes('className')) {
+          const why = writeNote || (plan.reason ? ` [${plan.reason}]` : '')
+          log(`style OK ${plan.prop}=${plan.value}${note}${why} → ${writeFile}`)
+        }
       } else {
         skipped++
         failed.push({ reason: `не удалось записать ${plan.prop}`, selector: applySelector })

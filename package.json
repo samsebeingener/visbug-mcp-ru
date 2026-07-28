@@ -1,6 +1,6 @@
 {
   "name": "visbug-mcp-ru",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "type": "module",
   "description": "Self-service VisBug Bridge: localhost проекты, auto-apply и Cursor Agent fallback",
   "author": "Nikita Kulikov <https://samsebeingener.ru>",
@@ -24,7 +24,12 @@
     "postinstall": "node scripts/ensure-agent-cli.mjs || exit 0"
   },
   "dependencies": {
+    "@babel/generator": "^7.28.0",
+    "@babel/parser": "^7.28.0",
+    "@babel/traverse": "^7.28.0",
+    "@babel/types": "^7.28.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "tailwind-merge": "^3.3.0",
     "ws": "^8.18.0"
   }
 }

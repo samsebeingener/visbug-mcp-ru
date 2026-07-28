@@ -107,11 +107,12 @@ test('auto-apply with visbugSrc writes linked CSS block and accumulates margin',
     ]
     const result = autoApplyWorkspace(workspace, changes)
     const css = readFileSync(join(workspace, 'src/styles/monochrom/sections.css'), 'utf8')
+    const tsx = readFileSync(join(workspace, 'src/components/sections/pricing.tsx'), 'utf8')
 
     assert.equal(result.applied, 1)
-    assert.match(css, /visbug-src:\s*src\/components\/sections\/pricing\.tsx:4:7/)
-    assert.match(css, /#services \.builder-rich-text[\s\S]*margin-inline-start:\s*-104px/)
-    assert.doesNotMatch(css, /margin-inline-start:\s*32px;/)
+    assert.match(tsx, /-ml-\[104px\]/)
+    assert.match(css, /margin-inline-start:\s*-136px/)
+    assert.doesNotMatch(css, /margin-inline-start:\s*-104px/)
   } finally {
     rmSync(workspace, { recursive: true, force: true })
   }
