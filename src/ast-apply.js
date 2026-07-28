@@ -11,6 +11,7 @@ import _generate from '@babel/generator'
 import * as t from '@babel/types'
 import { twMerge } from 'tailwind-merge'
 import { parseVisbugSrc, resolveSourceFilePath, readRulePropFromCss } from './visbug-src.js'
+import { marginFromAlignReference } from './move-target.js'
 
 const traverse = _traverse.default ?? _traverse
 const generate = _generate.default ?? _generate
@@ -201,6 +202,9 @@ export function resolveMoveTargetPx(workspace, change, plan, applySelector, targ
   if (base === null) base = 0
 
   const deltaChange = plan.prop === 'margin-top' ? topChange : leftChange
+  const alignTarget = marginFromAlignReference(deltaChange, base)
+  if (alignTarget !== null) return alignTarget
+
   const delta = parsePx(deltaChange?.newValue)
   if (!Number.isFinite(delta)) return null
   return base + delta

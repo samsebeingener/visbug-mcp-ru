@@ -199,7 +199,7 @@ test('grid Move with left≈gap drops X and keeps gutter (no items-center path)'
   }
 })
 
-test('builder-rich-text p move accumulates existing margin-inline-start', () => {
+test('builder-rich-text p move accumulates existing margin-inline-start on container', () => {
   const longSelector = [
     '#services > div.site-container.monochrom-content-section__inner',
     '> div.mb-10.grid.grid-cols-1.gap-10.lg\\:mb-12.lg\\:grid-cols-12.lg\\:gap-16:nth-of-type(1)',
@@ -208,7 +208,7 @@ test('builder-rich-text p move accumulates existing margin-inline-start', () => 
   ].join(' ')
 
   const workspace = makeWorkspace({
-    'src/styles/monochrom/sections.css': `#services .builder-rich-text p:nth-of-type(1) {
+    'src/styles/monochrom/sections.css': `#services .builder-rich-text {
   margin-inline-start: -136px;
 }
 `,
@@ -221,14 +221,14 @@ test('builder-rich-text p move accumulates existing margin-inline-start', () => 
     const css = readFileSync(join(workspace, 'src/styles/monochrom/sections.css'), 'utf8')
 
     assert.equal(result.applied, 1)
-    assert.match(css, /margin-inline-start:\s*-104px/)
-    assert.doesNotMatch(css, /margin-inline-start:\s*32px/)
+    assert.match(css, /#services \.builder-rich-text[\s\S]*margin-inline-start:\s*-104px/)
+    assert.doesNotMatch(css, /p:nth-of-type/)
   } finally {
     rmSync(workspace, { recursive: true, force: true })
   }
 })
 
-test('builder-rich-text p move in grid writes margin-inline-start (not gutter noop)', () => {
+test('builder-rich-text p move writes container margin and strips per-paragraph rules', () => {
   const longSelector = [
     '#services > div.site-container.monochrom-content-section__inner',
     '> div.mb-10.grid.grid-cols-1.gap-10.lg\\:mb-12.lg\\:grid-cols-12.lg\\:gap-16:nth-of-type(1)',
@@ -237,7 +237,9 @@ test('builder-rich-text p move in grid writes margin-inline-start (not gutter no
   ].join(' ')
 
   const workspace = makeWorkspace({
-    'src/styles/monochrom/sections.css': '#services { color: #111; }\n',
+    'src/styles/monochrom/sections.css': `#services { color: #111; }
+#services .builder-rich-text p:nth-of-type(1) { margin-inline-start: 12px; }
+`,
   })
   try {
     const changes = [
@@ -249,7 +251,8 @@ test('builder-rich-text p move in grid writes margin-inline-start (not gutter no
 
     assert.equal(result.applied, 1)
     assert.equal(result.failed.length, 0)
-    assert.match(css, /#services \.builder-rich-text p:nth-of-type\(1\)[\s\S]*margin-inline-start:\s*32px/)
+    assert.match(css, /#services \.builder-rich-text[\s\S]*margin-inline-start:\s*32px/)
+    assert.doesNotMatch(css, /p:nth-of-type\(1\)/)
   } finally {
     rmSync(workspace, { recursive: true, force: true })
   }

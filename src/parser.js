@@ -171,6 +171,11 @@ export function isGridColumnLeaf(selector, tag = '') {
 /** Классы, по которым строим короткий селектор для CSS. */
 const MEANINGFUL_APPLY_CLASSES = [
   'builder-rich-text',
+  'prose',
+  'wysiwyg',
+  'entry-content',
+  'content-body',
+  'article-body',
   'service-cell',
   'services-matrix',
   'service-title',
@@ -226,6 +231,23 @@ function findMeaningfulClass(selector) {
     const re = new RegExp(`(?:^|[.\\s>#])${cls}(?:[.\\s:>\\[]|$)`)
     return re.test(selector) || selector.includes(`.${cls}`) || selector.includes(`${cls}.`)
   })
+}
+
+/**
+ * @param {string} selector
+ * @param {{ richTextOnly?: boolean }} [options]
+ */
+export function findMeaningfulClassInSelector(selector, options = {}) {
+  const { richTextOnly = false } = options
+  for (const cls of MEANINGFUL_APPLY_CLASSES) {
+    const re = new RegExp(`(?:^|[.\\s>#])${cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[.\\s:>\\[]|$)`)
+    if (!re.test(selector) && !selector.includes(`.${cls}`)) continue
+    if (richTextOnly && !/rich.?text|prose|wysiwyg|entry-content|content-body|article-body|cms-content|formatted-body/i.test(cls)) {
+      continue
+    }
+    return cls
+  }
+  return null
 }
 
 function selectorTargetsSectionRoot(selector, section) {

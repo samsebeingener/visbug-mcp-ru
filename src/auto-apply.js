@@ -26,6 +26,14 @@ import {
   pickCssTargetForVisbug,
 } from './visbug-src.js'
 import { canTryAstMoveApply, resolveMoveTargetPx, tryApplyMoveAst } from './ast-apply.js'
+import {
+  collectRelatedMoveChanges,
+  findRichTextContainerClass,
+  marginFromAlignReference,
+  pickBestMoveChange,
+  resolveMoveApplySelector,
+  stripPerParagraphMarginRules,
+} from './move-target.js'
 
 const CSS_EXT = new Set(['.css', '.scss'])
 
@@ -181,7 +189,7 @@ export function planMoveApply(selector, tag, leftChange, topChange) {
   const xOnly = Boolean(leftChange) && (!topChange || !Number.isFinite(y) || Math.abs(y) < 1)
   const yOnly = Boolean(topChange) && (!leftChange || !Number.isFinite(x) || Math.abs(x) < 1)
 
-  if (/builder-rich-text/i.test(selector) && isTextMoveTag(tagName)) {
+  if (findRichTextContainerClass(selector) && isTextMoveTag(tagName)) {
     if (xOnly) {
       return {
         kind: 'css-prop',
@@ -294,13 +302,22 @@ function rewriteGridItemsCenterToEnd(workspace, selector) {
 function writeStyleDecl(target, selector, prop, value) {
   const visbugSrc = target.visbugSrc ?? null
   if (target.type === 'file') {
-    const css = readFileSync(target.path, 'utf8')
+    let css = readFileSync(target.path, 'utf8')
+    if (findRichTextContainerClass(selector) && /^margin-/.test(prop)) {
+      css = stripPerParagraphMarginRules(css, selector)
+    }
     const next = upsertRule(css, selector, prop, value, { visbugSrc })
     if (next === css) return false
     writeFileSync(target.path, next, 'utf8')
     return true
   }
   return applyStyleToInlineHtml(target.path, selector, prop, value)
+}
+
+function resolveApplyForMove(change, workspace) {
+  return resolveMoveApplySelector(change, workspace, (c, sel, ws) => (
+    resolveApplySelectorWithVisbug(c, sel, ws)
+  ))
 }
 
 
@@ -335,7 +352,7 @@ export function readRulePropPx(css, selector, prop, visbugSrc) {
 }
 
 /**
- * VisBug left/top — дельта от текущей вёрстки; margin в файле нужно накапливать, не затирать.
+ * VisBug left/top — дельта или align.reference; margin накапливается, не затирается.
  */
 export function resolveMoveCssValue(target, applySelector, plan, leftChange, topChange) {
   if (plan.kind !== 'css-prop' || !plan.value || target.type !== 'file') return plan
@@ -345,9 +362,17 @@ export function resolveMoveCssValue(target, applySelector, plan, leftChange, top
 
   if (plan.prop === 'margin-inline-start' && leftChange) {
     const existing = readRulePropPx(css, applySelector, 'margin-inline-start', visbugSrc)
+    const base = Number.isFinite(existing) ? existing : 0
+    const alignMargin = marginFromAlignReference(leftChange, base)
+    if (alignMargin !== null) {
+      return {
+        ...plan,
+        value: formatLength(alignMargin),
+        reason: 'align.reference (левый край → reference)',
+      }
+    }
     const delta = parsePx(leftChange.newValue)
     if (Number.isFinite(delta)) {
-      const base = Number.isFinite(existing) ? existing : 0
       return {
         ...plan,
         value: formatLength(base + delta),
@@ -358,9 +383,17 @@ export function resolveMoveCssValue(target, applySelector, plan, leftChange, top
 
   if (plan.prop === 'margin-top' && topChange) {
     const existing = readRulePropPx(css, applySelector, 'margin-top', visbugSrc)
+    const base = Number.isFinite(existing) ? existing : 0
+    const alignMargin = marginFromAlignReference(topChange, base)
+    if (alignMargin !== null) {
+      return {
+        ...plan,
+        value: formatLength(alignMargin),
+        reason: 'align.reference (верхний край → reference)',
+      }
+    }
     const delta = parsePx(topChange.newValue)
     if (Number.isFinite(delta)) {
-      const base = Number.isFinite(existing) ? existing : 0
       return {
         ...plan,
         value: formatLength(base + delta),
@@ -657,25 +690,27 @@ export function autoApplyWorkspace(workspace, changes) {
     }
 
     if (change.property === 'left' || change.property === 'top') {
-      const key = change.selector
-      if (dragHandled.has(key)) {
-        change.applied = true
-        continue
-      }
-      dragHandled.add(key)
-
-      let applySelector = resolveApplySelector(change)
+      let applySelector = resolveApplyForMove(change, workspace)
       if (!applySelector) {
         skipped++
         failed.push({ reason: 'селектор слишком общий/небезопасный', selector: change.selector })
         log(`style skip selector ${change.selector?.slice(0, 60)}…`)
         continue
       }
-      applySelector = resolveApplySelectorWithVisbug(change, applySelector, workspace)
 
-      const leftChange = pending.find((c) => c.selector === key && c.property === 'left')
-      const topChange = pending.find((c) => c.selector === key && c.property === 'top')
-      const visbugSrc = change.visbugSrc ?? null
+      const moveGroupKey = `move:${applySelector}`
+      if (dragHandled.has(moveGroupKey)) {
+        change.applied = true
+        continue
+      }
+      dragHandled.add(moveGroupKey)
+
+      const resolveForGroup = (c) => resolveApplyForMove(c, workspace)
+      const related = collectRelatedMoveChanges(pending, applySelector, workspace, resolveForGroup)
+      const leftChange = pickBestMoveChange(related.filter((c) => c.property === 'left'))
+      const topChange = pickBestMoveChange(related.filter((c) => c.property === 'top'))
+      const visbugSrc = (leftChange ?? topChange ?? change).visbugSrc ?? change.visbugSrc ?? null
+
       const target = pickCssTarget(workspace, applySelector, layout, visbugSrc)
       if (!target) {
         skipped++
@@ -684,10 +719,11 @@ export function autoApplyWorkspace(workspace, changes) {
       }
       if (visbugSrc && !target.visbugSrc) target.visbugSrc = visbugSrc
 
+      const anchorChange = leftChange ?? topChange ?? change
       const plan = resolveMoveCssValue(
         target,
         applySelector,
-        planMoveApply(change.selector, change.tag, leftChange, topChange),
+        planMoveApply(anchorChange.selector, anchorChange.tag, leftChange, topChange),
         leftChange,
         topChange,
       )
@@ -750,10 +786,10 @@ export function autoApplyWorkspace(workspace, changes) {
       let writeFile = target.path
       let writeNote = ''
 
-      if (canTryAstMoveApply(change, plan, layout)) {
+      if (canTryAstMoveApply(anchorChange, plan, layout)) {
         const targetPx = resolveMoveTargetPx(
           workspace,
-          change,
+          anchorChange,
           plan,
           applySelector,
           target,
@@ -763,7 +799,7 @@ export function autoApplyWorkspace(workspace, changes) {
         const astPlan = Number.isFinite(targetPx)
           ? { ...plan, value: formatLength(targetPx) }
           : plan
-        const ast = tryApplyMoveAst(workspace, change, astPlan)
+        const ast = tryApplyMoveAst(workspace, anchorChange, astPlan)
         if (ast.ok) {
           wrote = true
           writeFile = ast.file
@@ -782,7 +818,10 @@ export function autoApplyWorkspace(workspace, changes) {
       if (wrote) {
         if (leftChange) leftChange.applied = true
         if (topChange) topChange.applied = true
-        applied += (leftChange ? 1 : 0) + (topChange ? 1 : 0)
+        for (const item of related) {
+          item.applied = true
+        }
+        applied += (leftChange ? 1 : 0) + (topChange ? 1 : 0) || 1
         files.add(writeFile)
         writes.push({
           type: 'style',

@@ -5,6 +5,11 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { join, extname, normalize } from 'path'
 import { extractSectionKey } from './parser.js'
+import {
+  findRichTextContainerClass,
+  isPerParagraphTextSelector,
+  resolveMoveContainerSelector,
+} from './move-target.js'
 
 const CODE_EXT = new Set(['.tsx', '.ts', '.jsx', '.js', '.astro', '.mdx'])
 const CSS_EXT = new Set(['.css', '.scss'])
@@ -102,33 +107,42 @@ export function readRulePropFromCss(css, selector, prop, visbugSrc) {
 }
 
 /**
- * Уточняет селектор по строке исходника (BuilderRichText → блок, не каждый p).
+ * Уточняет селектор по строке исходника (компонент rich text → блок, не каждый p).
  */
 export function resolveApplySelectorWithVisbug(change, applySelector, workspace) {
   const visbugSrc = change?.visbugSrc
   const parsed = parseVisbugSrc(visbugSrc)
-  if (!parsed || !workspace) return applySelector
+  if (!parsed || !workspace) {
+    return promoteTextMoveIfNeeded(change, applySelector)
+  }
 
   const filePath = resolveSourceFilePath(workspace, visbugSrc)
-  if (!filePath) return applySelector
+  if (!filePath) return promoteTextMoveIfNeeded(change, applySelector)
 
   let line = ''
   try {
     const lines = readFileSync(filePath, 'utf8').split(/\r?\n/)
     line = lines[parsed.line - 1] ?? ''
   } catch {
-    return applySelector
+    return promoteTextMoveIfNeeded(change, applySelector)
   }
 
-  const isRichTextHost = /BuilderRichText|builder-rich-text/i.test(line)
-  const isPerParagraph = /p:nth-of-type|> p\b/i.test(applySelector)
+  const isRichTextHost = /RichText|Prose|Wysiwyg|ContentBody|ArticleBody|EntryContent/i.test(line)
+    || findRichTextContainerClass(line)
+  const isPerParagraph = isPerParagraphTextSelector(applySelector, change.tag)
 
-  if (isRichTextHost && isPerParagraph && /builder-rich-text/i.test(applySelector)) {
-    const section = extractSectionKey(applySelector)
-    return section ? `#${section} .builder-rich-text` : '.builder-rich-text'
+  if (isRichTextHost && isPerParagraph) {
+    const container = resolveMoveContainerSelector(change.selector ?? '', change.tag)
+    if (container) return container
   }
 
-  return applySelector
+  return promoteTextMoveIfNeeded(change, applySelector)
+}
+
+function promoteTextMoveIfNeeded(change, applySelector) {
+  if (!isPerParagraphTextSelector(applySelector, change?.tag)) return applySelector
+  const container = resolveMoveContainerSelector(change?.selector ?? '', change?.tag)
+  return container ?? applySelector
 }
 
 /**

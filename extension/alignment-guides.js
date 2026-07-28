@@ -249,6 +249,7 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
 
   function buildAlignPayload(match, getSelector) {
     const refRect = match.otherRect
+    const dragRect = match.dragRect
     return {
       mode: 'edge',
       edge: match.dragKind,
@@ -263,6 +264,12 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
           width: Math.round(refRect.width),
           height: Math.round(refRect.height),
         },
+      },
+      dragRect: {
+        left: Math.round(dragRect.left),
+        top: Math.round(dragRect.top),
+        width: Math.round(dragRect.width),
+        height: Math.round(dragRect.height),
       },
     }
   }
