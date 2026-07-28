@@ -18,6 +18,13 @@ import {
   extractSectionKey,
 } from './parser.js'
 import { getStoreDir } from './config.js'
+import {
+  parseVisbugSrc,
+  resolveSourceFilePath,
+  readRulePropFromCss,
+  resolveApplySelectorWithVisbug,
+  pickCssTargetForVisbug,
+} from './visbug-src.js'
 
 const CSS_EXT = new Set(['.css', '.scss'])
 
@@ -284,9 +291,10 @@ function rewriteGridItemsCenterToEnd(workspace, selector) {
 }
 
 function writeStyleDecl(target, selector, prop, value) {
+  const visbugSrc = target.visbugSrc ?? null
   if (target.type === 'file') {
     const css = readFileSync(target.path, 'utf8')
-    const next = upsertRule(css, selector, prop, value)
+    const next = upsertRule(css, selector, prop, value, { visbugSrc })
     if (next === css) return false
     writeFileSync(target.path, next, 'utf8')
     return true
@@ -321,16 +329,8 @@ function formatCssValue(prop, value) {
 }
 
 /** Читает числовое значение px из существующего CSS-правила (для накопления margin). */
-export function readRulePropPx(css, selector, prop) {
-  const sel = normalizeSelector(selector)
-  const blockRe = new RegExp(`(${escapeRe(sel)}\\s*\\{)([^}]*)(\\})`, 'm')
-  const m = css.match(blockRe)
-  if (!m) return null
-  const propRe = new RegExp(`${escapeRe(prop)}\\s*:\\s*([^;]+)`, 'i')
-  const pm = m[2].match(propRe)
-  if (!pm) return null
-  const px = parsePx(pm[1].trim())
-  return Number.isFinite(px) ? px : null
+export function readRulePropPx(css, selector, prop, visbugSrc) {
+  return readRulePropFromCss(css, selector, prop, visbugSrc)
 }
 
 /**
@@ -340,9 +340,10 @@ export function resolveMoveCssValue(target, applySelector, plan, leftChange, top
   if (plan.kind !== 'css-prop' || !plan.value || target.type !== 'file') return plan
 
   const css = readFileSync(target.path, 'utf8')
+  const visbugSrc = target.visbugSrc ?? null
 
   if (plan.prop === 'margin-inline-start' && leftChange) {
-    const existing = readRulePropPx(css, applySelector, 'margin-inline-start')
+    const existing = readRulePropPx(css, applySelector, 'margin-inline-start', visbugSrc)
     const delta = parsePx(leftChange.newValue)
     if (Number.isFinite(delta)) {
       const base = Number.isFinite(existing) ? existing : 0
@@ -355,7 +356,7 @@ export function resolveMoveCssValue(target, applySelector, plan, leftChange, top
   }
 
   if (plan.prop === 'margin-top' && topChange) {
-    const existing = readRulePropPx(css, applySelector, 'margin-top')
+    const existing = readRulePropPx(css, applySelector, 'margin-top', visbugSrc)
     const delta = parsePx(topChange.newValue)
     if (Number.isFinite(delta)) {
       const base = Number.isFinite(existing) ? existing : 0
@@ -370,9 +371,31 @@ export function resolveMoveCssValue(target, applySelector, plan, leftChange, top
   return plan
 }
 
-function upsertRule(css, selector, prop, value) {
+function upsertRule(css, selector, prop, value, { visbugSrc } = {}) {
   const sel = normalizeSelector(selector)
   const decl = `  ${prop}: ${value};`
+  const parsed = parseVisbugSrc(visbugSrc)
+
+  if (parsed) {
+    for (const needle of [parsed.raw, parsed.relativePath]) {
+      const commentRe = new RegExp(
+        `(/\\*\\s*visbug-src:\\s*${escapeRe(needle)}\\s*\\*/\\s*)([^{]*)(\\{)([^}]*)(\\})`,
+        'm',
+      )
+      const cm = css.match(commentRe)
+      if (cm) {
+        let body = cm[4]
+        const propRe = new RegExp(`\\s*${escapeRe(prop)}\\s*:[^;]+;?`)
+        if (propRe.test(body)) {
+          body = body.replace(propRe, `\n${decl}`)
+        } else {
+          body = `${body.trimEnd()}\n${decl}\n`
+        }
+        return css.replace(commentRe, `${cm[1]}${sel} ${cm[3]}${body}${cm[5]}`)
+      }
+    }
+  }
+
   const blockRe = new RegExp(
     `(${escapeRe(sel)}\\s*\\{)([^}]*)(\\})`,
     'm',
@@ -390,7 +413,8 @@ function upsertRule(css, selector, prop, value) {
   }
 
   const marker = '/* VisBug layout'
-  const insert = `\n${sel} {\n${decl}\n}\n`
+  const header = visbugSrc ? `/* visbug-src: ${visbugSrc} */\n` : ''
+  const insert = `\n${header}${sel} {\n${decl}\n}\n`
   const idx = css.indexOf(marker)
   if (idx !== -1) {
     return css.slice(0, idx) + insert + css.slice(idx)
@@ -402,7 +426,10 @@ function escapeRe(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-function pickCssTarget(workspace, selector, layout) {
+function pickCssTarget(workspace, selector, layout, visbugSrc) {
+  const fromSrc = pickCssTargetForVisbug(workspace, selector, layout, { visbugSrc })
+  if (fromSrc) return fromSrc
+
   const cssRoot = workspace
   const files = walkCssFiles(cssRoot)
   const prefer = files.filter((f) => /sections\.css$/i.test(f))
@@ -485,6 +512,19 @@ function replaceTextInWorkspace(workspace, change, layout) {
   const newT = String(change.newValue ?? '').trim()
   if (!oldT || oldT === newT) return null
   if (layout === 'static-html') return replaceTextInStaticHtml(workspace, oldT, newT)
+
+  const srcFile = resolveSourceFilePath(workspace, change.visbugSrc)
+  if (srcFile && existsSync(srcFile)) {
+    const src = readFileSync(srcFile, 'utf8')
+    const count = src.split(oldT).length - 1
+    if (count === 1) {
+      writeFileSync(srcFile, src.replace(oldT, newT), 'utf8')
+      return srcFile
+    }
+    if (count > 1) {
+      log(`text skip ambiguous in visbug-src ${srcFile}`)
+    }
+  }
 
   const dirs = [join(workspace, 'src'), join(workspace, 'app'), join(workspace, 'pages')]
   const exts = new Set(['.tsx', '.ts', '.jsx', '.js', '.astro', '.html', '.mdx'])
@@ -623,22 +663,25 @@ export function autoApplyWorkspace(workspace, changes) {
       }
       dragHandled.add(key)
 
-      const applySelector = resolveApplySelector(change)
+      let applySelector = resolveApplySelector(change)
       if (!applySelector) {
         skipped++
         failed.push({ reason: 'селектор слишком общий/небезопасный', selector: change.selector })
         log(`style skip selector ${change.selector?.slice(0, 60)}…`)
         continue
       }
+      applySelector = resolveApplySelectorWithVisbug(change, applySelector, workspace)
 
       const leftChange = pending.find((c) => c.selector === key && c.property === 'left')
       const topChange = pending.find((c) => c.selector === key && c.property === 'top')
-      const target = pickCssTarget(workspace, applySelector, layout)
+      const visbugSrc = change.visbugSrc ?? null
+      const target = pickCssTarget(workspace, applySelector, layout, visbugSrc)
       if (!target) {
         skipped++
         failed.push({ reason: 'нет CSS/HTML цели', selector: applySelector })
         continue
       }
+      if (visbugSrc && !target.visbugSrc) target.visbugSrc = visbugSrc
 
       const plan = resolveMoveCssValue(
         target,
@@ -741,20 +784,23 @@ export function autoApplyWorkspace(workspace, changes) {
       continue
     }
 
-    const applySelector = resolveApplySelector(change)
+    let applySelector = resolveApplySelector(change)
     if (!applySelector) {
       skipped++
       failed.push({ reason: 'селектор слишком общий/небезопасный', selector: change.selector })
       log(`style skip selector ${change.selector?.slice(0, 60)}…`)
       continue
     }
+    applySelector = resolveApplySelectorWithVisbug(change, applySelector, workspace)
 
-    const target = pickCssTarget(workspace, applySelector, layout)
+    const visbugSrc = change.visbugSrc ?? null
+    const target = pickCssTarget(workspace, applySelector, layout, visbugSrc)
     if (!target) {
       skipped++
       failed.push({ reason: 'нет CSS/HTML цели', selector: applySelector })
       continue
     }
+    if (visbugSrc && !target.visbugSrc) target.visbugSrc = visbugSrc
 
     const value = formatCssValue(prop, change.newValue)
     const wrote = writeStyleDecl(target, applySelector, prop, value)
