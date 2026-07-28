@@ -158,7 +158,7 @@ function startRecordingSnapshot() {
   recordingRootSelector = getSelector(root)
   recordingBefore = snap().captureSnapshot(root, getSelector)
   globalThis.__visbugMcpRecordingBefore = recordingBefore
-  guides()?.start(recordingScopeRoot)
+  guides()?.start(recordingScopeRoot, getSelector)
   uiTrim()?.install()
   badge()?.start()
   textWatch()?.start(recordingScopeRoot, getSelector, { url: location.href })
@@ -195,6 +195,12 @@ function finishRecordingSnapshot() {
       const changes = snap().mergeTextChanges
         ? snap().mergeTextChanges(snapshotChanges, watchedText)
         : snapshotChanges
+
+      const alignRefs = guides()?.consumeAlignReferences?.() ?? []
+      if (alignRefs.length && guides()?.attachAlignToChanges) {
+        guides().attachAlignToChanges(changes, alignRefs)
+        console.debug('[visbug-mcp] align references:', alignRefs.length)
+      }
 
       send({
         event: 'recording-result',

@@ -112,3 +112,65 @@ test('setChangesFromRecording and getPendingChanges stay compatible with auto-ap
   assert.equal(pending[0].property, 'width')
   assert.equal(pending[0].newValue, '400px')
 })
+
+test('compile preserves align.reference on MOVE from legacy changes', () => {
+  const refSelector = '#services > article:nth-of-type(2) > ul'
+  const align = {
+    mode: 'edge',
+    edge: 'left',
+    axis: 'x',
+    distance: 0,
+    reference: {
+      selector: refSelector,
+      edge: 'left',
+      rect: { left: 120, top: 400, width: 280, height: 96 },
+    },
+  }
+
+  const changes = [
+    {
+      type: 'style',
+      selector,
+      property: 'left',
+      newValue: '32px',
+      tag: 'p',
+      align,
+      applied: false,
+    },
+    { type: 'style', selector, property: 'top', newValue: '0px', tag: 'p', applied: false },
+  ]
+
+  const { actions } = legacyChangesToActions(changes)
+
+  assert.equal(actions.length, 1)
+  assert.equal(actions[0].type, ACTION_TYPES.MOVE)
+  assert.equal(actions[0].align.reference.selector, refSelector)
+  assert.equal(actions[0].align.reference.edge, 'left')
+  assert.equal(validateAction(actions[0]).ok, true)
+})
+
+test('flatten roundtrip preserves align.reference on MOVE', () => {
+  const align = {
+    mode: 'edge',
+    edge: 'left',
+    axis: 'x',
+    distance: 2,
+    reference: {
+      selector: '#services ul',
+      edge: 'left',
+      rect: { left: 80, top: 200, width: 300, height: 120 },
+    },
+  }
+
+  const original = [
+    { type: 'style', selector, property: 'left', newValue: '32px', align, applied: false },
+    { type: 'style', selector, property: 'top', newValue: '0px', applied: false },
+  ]
+
+  const { actions } = legacyChangesToActions(original)
+  const flattened = actionsToLegacyChanges(actions)
+  const left = flattened.find((c) => c.property === 'left')
+
+  assert.ok(left?.align)
+  assert.equal(left.align.reference.selector, '#services ul')
+})

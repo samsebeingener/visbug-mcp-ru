@@ -58,6 +58,11 @@ export function validateAction(action) {
           errors.push('MOVE delta must include x and/or y')
         }
       }
+      if (action.align && typeof action.align === 'object') {
+        if (action.align.reference && !action.align.reference.selector) {
+          errors.push('MOVE align.reference missing selector')
+        }
+      }
       break
     case ACTION_TYPES.STYLE:
       if (!Array.isArray(action.changes) || action.changes.length === 0) {

@@ -4,7 +4,7 @@
  * Drag/resize: красные линии к соседям при сближении + px.
  */
 
-const GUIDES_BUILD = 5
+const GUIDES_BUILD = 6
 
 // Всегда переинициализируем модуль (reload расширения / F5) — иначе stop() без start().
 globalThis.VisbugMcpAlignmentGuides?.stop?.()
@@ -247,6 +247,37 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
     return el
   }
 
+  function buildAlignPayload(match, getSelector) {
+    const refRect = match.otherRect
+    return {
+      mode: 'edge',
+      edge: match.dragKind,
+      axis: match.axis,
+      distance: Math.round(match.distance),
+      reference: {
+        selector: getSelector(match.otherEl),
+        edge: match.refKind,
+        rect: {
+          left: Math.round(refRect.left),
+          top: Math.round(refRect.top),
+          width: Math.round(refRect.width),
+          height: Math.round(refRect.height),
+        },
+      },
+    }
+  }
+
+  function attachAlignToChanges(changes, alignRefs) {
+    if (!Array.isArray(changes) || !Array.isArray(alignRefs)) return changes
+    const map = new Map(alignRefs.map((entry) => [entry.draggedSelector, entry.align]))
+    for (const change of changes) {
+      if (change?.type !== 'style' || change.property !== 'left') continue
+      const align = map.get(change.selector)
+      if (align && !change.align) change.align = align
+    }
+    return changes
+  }
+
   const guides = {
     root: null,
     host: null,
@@ -257,6 +288,8 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
     candidates: [],
     observer: null,
     drawnNearLabelKeys: null,
+    getSelector: null,
+    alignBySelector: new Map(),
 
     onScroll: null,
     onResize: null,
@@ -536,6 +569,18 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
         }
         this.drawMatch(match)
       }
+
+      if (this.draggedEl && this.getSelector) {
+        const snapped = matches.filter((m) => m.snapped)
+        if (snapped.length) {
+          const best = snapped.sort((a, b) => a.distance - b.distance)[0]
+          const draggedSelector = this.getSelector(this.draggedEl)
+          this.alignBySelector.set(
+            draggedSelector,
+            buildAlignPayload(best, this.getSelector),
+          )
+        }
+      }
     },
 
     tick() {
@@ -543,11 +588,13 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
       this.rafId = requestAnimationFrame(() => this.tick())
     },
 
-    start(root) {
+    start(root, getSelector) {
       this.stop()
       if (!root) return
 
       this.root = root
+      this.getSelector = typeof getSelector === 'function' ? getSelector : null
+      this.alignBySelector = new Map()
       this.createOverlay()
 
       this.observer = new MutationObserver((records) => {
@@ -598,14 +645,31 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
       this.root = null
       this.draggedEl = null
       this.candidates = []
+      this.getSelector = null
+      this.alignBySelector = new Map()
+    },
+
+    exportAlignReferences() {
+      return [...this.alignBySelector.entries()].map(([draggedSelector, align]) => ({
+        draggedSelector,
+        align,
+      }))
+    },
+
+    consumeAlignReferences() {
+      const refs = this.exportAlignReferences()
+      this.alignBySelector.clear()
+      return refs
     },
   }
 
   globalThis.VisbugMcpAlignmentGuides = {
     build: GUIDES_BUILD,
-    version: '0.6.35',
-    start: (root) => guides.start(root),
+    version: '0.7.3',
+    start: (root, getSelector) => guides.start(root, getSelector),
     stop: () => guides.stop(),
+    consumeAlignReferences: () => guides.consumeAlignReferences(),
+    attachAlignToChanges: (changes, alignRefs) => attachAlignToChanges(changes, alignRefs),
   }
 
   // Reload расширения во время активной записи — восстановить направляющие.

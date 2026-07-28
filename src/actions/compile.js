@@ -70,12 +70,15 @@ function makeMoveAction(bucket) {
     unit: 'px',
   }
 
+  const align = left?.align ?? top?.align ?? undefined
+
   return {
     id: createActionId(),
     type: ACTION_TYPES.MOVE,
     target,
     applied: moveApplied({ left, top }),
     delta,
+    ...(align ? { align } : {}),
     oldLeft: left?.oldValue,
     oldTop: top?.oldValue,
     timestamp: left?.timestamp ?? top?.timestamp,

@@ -21,7 +21,11 @@ function shortSelector(selector) {
 function formatMove(action, index) {
   const { x = 0, y = 0, unit = 'px' } = action.delta ?? {}
   const src = action.target?.visbugSrc ? ` (${action.target.visbugSrc})` : ''
-  return `[${index}] ${shortSelector(action.target.selector)}${src} → сдвиг: x=${x}${unit}, y=${y}${unit}`
+  const ref = action.align?.reference
+  const alignNote = ref
+    ? `, выравнивание: ${shortSelector(ref.selector)} (${ref.edge})`
+    : ''
+  return `[${index}] ${shortSelector(action.target.selector)}${src} → сдвиг: x=${x}${unit}, y=${y}${unit}${alignNote}`
 }
 
 function formatStyle(action, index) {

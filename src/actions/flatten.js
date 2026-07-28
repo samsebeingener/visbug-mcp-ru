@@ -37,10 +37,12 @@ export function actionsToLegacyChanges(actions) {
         const delta = action.delta ?? {}
         const hasLeft = action.oldLeft !== undefined || delta.x !== 0
         const hasTop = action.oldTop !== undefined || delta.y !== 0
+        const alignExtra = action.align ? { align: action.align } : {}
 
         if (hasLeft || delta.x !== 0) {
           changes.push({
             ...base,
+            ...alignExtra,
             type: 'style',
             property: 'left',
             oldValue: action.oldLeft,
