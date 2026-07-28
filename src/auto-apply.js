@@ -25,7 +25,16 @@ import {
   resolveApplySelectorWithVisbug,
   pickCssTargetForVisbug,
 } from './visbug-src.js'
-import { canTryAstMoveApply, resolveMoveTargetPx, tryApplyMoveAst } from './ast-apply.js'
+import {
+  canTryAstDimensionApply,
+  canTryAstMoveApply,
+  canTryAstTransformApply,
+  resolveMoveTargetPx,
+  resolveTranslateTargets,
+  tryApplyDimensionAst,
+  tryApplyMoveAst,
+  tryApplyTranslateAst,
+} from './ast-apply.js'
 import {
   collectRelatedMoveChanges,
   findRichTextContainerClass,
@@ -786,7 +795,30 @@ export function autoApplyWorkspace(workspace, changes) {
       let writeFile = target.path
       let writeNote = ''
 
-      if (canTryAstMoveApply(anchorChange, plan, layout)) {
+      if (canTryAstTransformApply(anchorChange, plan, layout)) {
+        const targets = resolveTranslateTargets(
+          workspace,
+          anchorChange,
+          plan,
+          applySelector,
+          target,
+          leftChange,
+          topChange,
+        )
+        if (targets) {
+          const ast = tryApplyTranslateAst(workspace, anchorChange, targets)
+          if (ast.ok) {
+            wrote = true
+            writeFile = ast.file
+            writeNote = ' [ast translate className]'
+            log(`style OK transform=${ast.value} (className) → ${ast.file}`)
+          } else {
+            log(`ast skip ${ast.reason} → CSS fallback`)
+          }
+        }
+      }
+
+      if (!wrote && canTryAstMoveApply(anchorChange, plan, layout)) {
         const targetPx = resolveMoveTargetPx(
           workspace,
           anchorChange,
@@ -877,21 +909,43 @@ export function autoApplyWorkspace(workspace, changes) {
     if (visbugSrc && !target.visbugSrc) target.visbugSrc = visbugSrc
 
     const value = formatCssValue(prop, change.newValue)
-    const wrote = writeStyleDecl(target, applySelector, prop, value)
+    let wrote = false
+    let writeFile = target.path
+    let astLogged = false
+
+    if (canTryAstDimensionApply(change, prop, layout)) {
+      const ast = tryApplyDimensionAst(workspace, change, prop, value)
+      if (ast.ok) {
+        wrote = true
+        writeFile = ast.file
+        astLogged = true
+        log(`style OK ${prop}=${value} (className) → ${ast.file}`)
+      } else if (ast.reason === 'dangerously-set-inner-html') {
+        log(`ast blocked innerHTML host → CSS fallback for ${prop}`)
+      } else {
+        log(`ast skip ${ast.reason} → CSS fallback`)
+      }
+    }
+
+    if (!wrote) {
+      wrote = writeStyleDecl(target, applySelector, prop, value)
+    }
 
     if (wrote) {
       change.applied = true
       applied++
-      files.add(target.path)
+      files.add(writeFile)
       writes.push({
         type: 'style',
         selector: applySelector,
         prop,
         value,
-        file: target.path,
+        file: writeFile,
       })
-      const note = applySelector !== change.selector ? ` (${applySelector})` : ''
-      log(`style OK ${prop}=${value}${note} → ${target.path}`)
+      if (!astLogged) {
+        const note = applySelector !== change.selector ? ` (${applySelector})` : ''
+        log(`style OK ${prop}=${value}${note} → ${writeFile}`)
+      }
     } else {
       skipped++
       failed.push({ reason: `не записалось ${prop}`, selector: applySelector })

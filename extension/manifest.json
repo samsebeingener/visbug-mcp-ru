@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VisBug MCP Bridge (RU)",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "description": "Передаёт правки VisBug в локальный Bridge для auto-apply и Cursor Agent",
   "permissions": [
     "activeTab",

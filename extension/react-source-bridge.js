@@ -3,7 +3,7 @@
  * Работает на localhost при npm run dev (Next/React включают source в development).
  */
 
-const BRIDGE_VERSION = '0.1.0'
+const BRIDGE_VERSION = '0.2.0'
 
 if (globalThis.VisbugMcpReactSourceBridge?.version !== BRIDGE_VERSION) {
 
@@ -38,15 +38,39 @@ function toVisbugSrc(source) {
   return `${rel}:${line}:${column}`
 }
 
+function annotateSubtree(el, inheritedSrc, stats) {
+  if (!el?.getAttribute) return inheritedSrc
+
+  let src = el.getAttribute('data-visbug-src')
+  if (!src) {
+    const fiberKey = getFiberKey(el)
+    if (fiberKey) {
+      const source = getDebugSourceFromFiber(el[fiberKey])
+      if (source) {
+        src = toVisbugSrc(source)
+        el.setAttribute('data-visbug-src', src)
+        stats.annotated++
+      }
+    }
+  }
+
+  if (!src && inheritedSrc) {
+    el.setAttribute('data-visbug-src', inheritedSrc)
+    stats.inherited++
+    src = inheritedSrc
+  }
+
+  const passDown = src || inheritedSrc
+  for (const child of el.children) {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      annotateSubtree(child, passDown, stats)
+    }
+  }
+  return passDown
+}
+
 function annotateElement(el, stats) {
-  if (!el?.getAttribute || el.hasAttribute('data-visbug-src')) return
-  const fiberKey = getFiberKey(el)
-  if (!fiberKey) return
-  const source = getDebugSourceFromFiber(el[fiberKey])
-  if (!source) return
-  const value = toVisbugSrc(source)
-  el.setAttribute('data-visbug-src', value)
-  stats.annotated++
+  annotateSubtree(el, null, stats)
 }
 
 /**
@@ -54,14 +78,10 @@ function annotateElement(el, stats) {
  * @param {Element|null} root
  */
 function annotateRecordingRoot(root) {
-  const stats = { annotated: 0, skipped: 0 }
+  const stats = { annotated: 0, inherited: 0, skipped: 0 }
   if (!root || root.nodeType !== Node.ELEMENT_NODE) return stats
 
-  annotateElement(root, stats)
-  for (const el of root.querySelectorAll('*')) {
-    annotateElement(el, stats)
-  }
-
+  annotateSubtree(root, null, stats)
   return stats
 }
 
