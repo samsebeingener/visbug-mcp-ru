@@ -19,7 +19,9 @@
     "icons": "python scripts/generate-extension-icons.py",
     "ensure-cli": "node scripts/ensure-agent-cli.mjs",
     "health": "node scripts/health-check.mjs",
+    "pretest": "node scripts/sync-extension-version.mjs",
     "test": "node --test test/*.test.js",
+    "sync:extension": "node scripts/sync-extension-version.mjs",
     "update": "node scripts/update.mjs",
     "postinstall": "node scripts/ensure-agent-cli.mjs || exit 0"
   },

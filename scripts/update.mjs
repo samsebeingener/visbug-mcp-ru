@@ -141,12 +141,15 @@ async function main() {
   const config = mergeConfigPreservingUser()
   syncWorkspaceCommands(config.autoAgent?.workspace)
 
+  run('node', [join(REPO_ROOT, 'scripts', 'sync-extension-version.mjs')], { inherit: true })
+
   clearPendingUpdate()
   restartDaemon()
 
   const version = readVersion()
   console.log(`\n✅ Обновлено до v${version}`)
-  console.log('   1. Chrome → chrome://extensions → ↻ visbug-mcp')
+  console.log('   1. Chrome → chrome://extensions → ↻ на карточке «VisBug MCP Bridge»')
+  console.log('      (кнопка «Обновить» в popup не перезагружает расширение — только ↻ в Chrome)')
   console.log('   2. Cursor → Reload Window')
   console.log('\n   Ваш config.json и буфер правок не затронуты.\n')
 }

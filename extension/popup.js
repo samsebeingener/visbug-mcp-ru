@@ -14,6 +14,12 @@ const installHintEl = document.getElementById('install-hint')
 const recordBtn = document.getElementById('record-btn')
 const clearBtn = document.getElementById('clear-btn')
 const copyBtn = document.getElementById('copy-btn')
+const extVersionEl = document.getElementById('ext-version')
+
+try {
+  const v = chrome.runtime.getManifest().version
+  if (extVersionEl) extVersionEl.textContent = `v${v}`
+} catch {}
 
 let ws = null
 let reconnectTimer = null

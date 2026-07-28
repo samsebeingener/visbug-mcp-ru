@@ -672,7 +672,7 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
 
   globalThis.VisbugMcpAlignmentGuides = {
     build: GUIDES_BUILD,
-    version: '0.7.3',
+    version: '0.8.1',
     start: (root, getSelector) => guides.start(root, getSelector),
     stop: () => guides.stop(),
     consumeAlignReferences: () => guides.consumeAlignReferences(),
