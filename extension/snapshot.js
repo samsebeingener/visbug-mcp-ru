@@ -2,7 +2,7 @@
  * Snapshot до/после — diff DOM-состояния для режима «Запись».
  */
 
-const SNAPSHOT_MODULE_VERSION = '0.5.2'
+const SNAPSHOT_MODULE_VERSION = '0.5.3'
 
 if (globalThis.VisbugMcpSnapshot?.version !== SNAPSHOT_MODULE_VERSION) {
 
@@ -95,6 +95,12 @@ function findTextOwnerElement(el) {
   return null
 }
 
+function readVisbugSrc(el) {
+  return el.getAttribute('data-visbug-src')
+    || el.closest?.('[data-visbug-src]')?.getAttribute('data-visbug-src')
+    || null
+}
+
 function captureSnapshot(rootEl, getSelector) {
   if (!rootEl || typeof getSelector !== 'function') return []
 
@@ -111,6 +117,7 @@ function captureSnapshot(rootEl, getSelector) {
       styles: captureElementStyles(el),
       className: el.getAttribute('class') ?? '',
       text: captureElementText(el),
+      visbugSrc: readVisbugSrc(el),
     })
   }
 
@@ -177,6 +184,7 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
         oldValue,
         newValue,
         tag: after.tag,
+        visbugSrc: after.visbugSrc ?? null,
         url,
         timestamp,
         applied: false,
@@ -191,6 +199,7 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
         oldValue: before.className,
         newValue: after.className,
         tag: after.tag,
+        visbugSrc: after.visbugSrc ?? null,
         url,
         timestamp,
         applied: false,
@@ -207,6 +216,7 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
           oldValue,
           newValue,
           tag: after.tag,
+          visbugSrc: after.visbugSrc ?? null,
           url,
           timestamp,
           applied: false,
@@ -236,6 +246,7 @@ globalThis.VisbugMcpSnapshot = {
   captureElementText,
   normalizeText,
   findTextOwnerElement,
+  readVisbugSrc,
   getDefaultSnapshotRoot,
   TEXT_ELEMENT_TAGS,
 }

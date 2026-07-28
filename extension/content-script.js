@@ -192,6 +192,7 @@ function finishRecordingSnapshot() {
 
       send({
         event: 'recording-result',
+        format: 2,
         url: location.href,
         rootSelector: recordingRootSelector,
         changes,

@@ -2,7 +2,7 @@
  * server.js — MCP-сервер (stdio)
  *
  * Запускается Cursor по запросу.
- * Читает и пишет ~/.visbug-mcp/changes.json.
+ * Читает и пишет ~/.visbug-mcp/changes.json (Actions v2).
  * WebSocket — отдельно в ws-daemon.js.
  */
 
@@ -13,7 +13,14 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { formatChangesFromStore } from './parser.js'
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import {
+  loadStore,
+  saveStore,
+  getLegacyChanges,
+  getPendingChanges,
+  normalizeStore,
+} from './actions/store.js'
+import { formatActionsForMcp } from './actions/format.js'
 import { homedir } from 'os'
 import { join } from 'path'
 import { PACKAGE_VERSION } from './version.js'
@@ -23,24 +30,33 @@ const STORE_FILE = join(STORE_DIR, 'changes.json')
 
 function readStore() {
   try {
-    mkdirSync(STORE_DIR, { recursive: true })
-    const data = JSON.parse(readFileSync(STORE_FILE, 'utf8'))
-    return data.changes ?? []
+    return loadStore(STORE_FILE)
   } catch {
-    return []
+    return normalizeStore({})
   }
 }
 
-function writeStore(changes) {
-  mkdirSync(STORE_DIR, { recursive: true })
-  writeFileSync(STORE_FILE, JSON.stringify({ changes }, null, 2))
+function writeStore(store) {
+  saveStore(STORE_FILE, store)
+}
+
+function formatStoreText(store, filter) {
+  const actionText = formatActionsForMcp(store)
+  if (actionText) {
+    if (!filter) return actionText
+    const legacy = getLegacyChanges(store).filter((c) => !c.applied && c.type === filter)
+    return legacy.length ? formatChangesFromStore(legacy, { type: filter }) : ''
+  }
+  const legacy = getLegacyChanges(store).filter((c) => !c.applied && (!filter || c.type === filter))
+  if (!legacy.length) return ''
+  return formatChangesFromStore(legacy, { type: filter })
 }
 
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 
 const mcpServer = new Server(
   { name: 'visbug-mcp', version: PACKAGE_VERSION },
-  { capabilities: { tools: {} } }
+  { capabilities: { tools: {} } },
 )
 
 mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -48,14 +64,14 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'get_changes',
       description:
-        'Возвращает визуальные правки, захваченные VisBug на localhost. '
-        + 'Для каждой записи: CSS-селектор, свойство, старое и новое значение, HTML-тег, URL страницы.',
+        'Возвращает визуальные правки VisBug (Actions v2: MOVE/STYLE/TEXT). '
+        + 'Для каждой записи: селектор, data-visbug-src если есть, дельта/стили, URL.',
       inputSchema: {
         type: 'object',
         properties: {
           filter: {
             type: 'string',
-            description: 'Фильтр по типу: "style" | "attribute" | "text" | "node-added" | "node-removed". Необязательно.',
+            description: 'Фильтр legacy-типа: "style" | "attribute" | "text". Необязательно.',
           },
         },
       },
@@ -63,7 +79,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'apply_changes',
       description:
-        'Помечает правки как применённые в буфере (~/.visbug-mcp/changes.json). '
+        'Помечает actions как применённые в буфере (~/.visbug-mcp/changes.json). '
         + 'Файлы проекта не меняет — их пишет auto-apply после «Стоп» или вы через /visbug-apply.',
       inputSchema: {
         type: 'object',
@@ -71,7 +87,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
           ids: {
             type: 'array',
             items: { type: 'number' },
-            description: 'Индексы правок для пометки. Пусто = все.',
+            description: 'Индексы actions для пометки. Пусто = все pending.',
           },
         },
       },
@@ -88,41 +104,43 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params
 
   if (name === 'get_changes') {
-    const changes = readStore()
+    const store = readStore()
     const filter = args?.filter
-    const hasPending = changes.some(c => !c.applied && (!filter || c.type === filter))
-    const text = hasPending ? formatChangesFromStore(changes, { type: filter }) : 'Нет правок.'
+    const pendingCount = getPendingChanges(store).length
+    const text = pendingCount === 0 ? 'Нет правок.' : (formatStoreText(store, filter) || 'Нет правок.')
     return { content: [{ type: 'text', text }] }
   }
 
   if (name === 'apply_changes') {
-    const changes = readStore()
+    const store = readStore()
     const ids = args?.ids
     let marked = 0
+
     if (!ids || ids.length === 0) {
-      changes.forEach(c => {
-        if (!c.applied) {
-          c.applied = true
+      for (const action of store.actions) {
+        if (!action.applied) {
+          action.applied = true
           marked++
         }
-      })
+      }
     } else {
-      ids.forEach(i => {
-        if (changes[i] && !changes[i].applied) {
-          changes[i].applied = true
+      ids.forEach((i) => {
+        if (store.actions[i] && !store.actions[i].applied) {
+          store.actions[i].applied = true
           marked++
         }
       })
     }
-    writeStore(changes)
-    return { content: [{ type: 'text', text: `Помечено как применённое: ${marked} правок` }] }
+
+    writeStore(store)
+    return { content: [{ type: 'text', text: `Помечено как применённое: ${marked} actions` }] }
   }
 
   if (name === 'clear_changes') {
-    const changes = readStore()
-    const count = changes.length
-    writeStore([])
-    return { content: [{ type: 'text', text: `Буфер очищен (удалено правок: ${count})` }] }
+    const store = readStore()
+    const count = store.actions.length
+    writeStore(normalizeStore({}))
+    return { content: [{ type: 'text', text: `Буфер очищен (удалено actions: ${count})` }] }
   }
 
   throw new Error(`Неизвестный инструмент: ${name}`)

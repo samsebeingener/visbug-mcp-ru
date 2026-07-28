@@ -1,6 +1,6 @@
 {
   "name": "visbug-mcp-ru",
-  "version": "0.6.36",
+  "version": "0.7.0",
   "type": "module",
   "description": "Self-service VisBug Bridge: localhost проекты, auto-apply и Cursor Agent fallback",
   "author": "Nikita Kulikov <https://samsebeingener.ru>",

@@ -4,6 +4,7 @@
  */
 
 import { WebSocketServer } from 'ws'
+import { randomUUID } from 'crypto'
 import { parseMutationsToChanges, formatChangesFromStore, clearSeen, restoreSeen } from './parser.js'
 import { loadConfig } from './config.js'
 import { handlePostRecording } from './auto-agent.js'
@@ -11,8 +12,18 @@ import { getCliHealthForUi } from './cli-resolver.js'
 import { checkForUpdatesIfDue } from './update-check.js'
 import { detectWorkspaceLayout } from './auto-apply.js'
 import { getProjects, resolveProjectForUrl } from './projects.js'
+import {
+  loadStore as loadActionStore,
+  saveStore as saveActionStore,
+  setChangesFromRecording as compileRecordingToStore,
+  getLegacyChanges,
+  getPendingChanges,
+  syncAppliedFromLegacy,
+  normalizeStore,
+} from './actions/store.js'
+import { formatActionsForMcp } from './actions/format.js'
 import { execSync } from 'child_process'
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { PACKAGE_VERSION } from './version.js'
@@ -21,7 +32,7 @@ const STORE_FILE = join(STORE_DIR, 'changes.json')
 const WS_PORT = 4844
 const LIVE_MUTATIONS_ENABLED = false
 
-const store = { changes: [] }
+let actionStore = normalizeStore({})
 let recordingActive = false
 let recordingProject = null
 let stopWatchdog = null
@@ -29,20 +40,21 @@ const STOP_TIMEOUT_MS = 4000
 
 function loadStore() {
   try {
-    mkdirSync(STORE_DIR, { recursive: true })
-    const data = JSON.parse(readFileSync(STORE_FILE, 'utf8'))
-    store.changes = data.changes ?? []
-    restoreSeen(store.changes)
-    process.stderr.write(`[ws-daemon] store загружен: ${store.changes.length} правок\n`)
+    actionStore = loadActionStore(STORE_FILE)
+    const legacy = getLegacyChanges(actionStore)
+    restoreSeen(legacy)
+    const pending = getPendingChanges(actionStore).length
+    process.stderr.write(
+      `[ws-daemon] store v${actionStore.version}: ${actionStore.actions.length} actions, ${pending} pending\n`,
+    )
   } catch {
-    // файла нет — пустой буфер
+    actionStore = normalizeStore({})
   }
 }
 
 function saveStore() {
   try {
-    mkdirSync(STORE_DIR, { recursive: true })
-    writeFileSync(STORE_FILE, JSON.stringify({ changes: store.changes }, null, 2))
+    actionStore = saveActionStore(STORE_FILE, actionStore)
   } catch (err) {
     process.stderr.write(`[ws-daemon] ошибка сохранения: ${err.message}\n`)
   }
@@ -50,36 +62,43 @@ function saveStore() {
 
 function syncFromFile() {
   try {
-    const data = JSON.parse(readFileSync(STORE_FILE, 'utf8'))
-    const fileChanges = data.changes ?? []
-    if (fileChanges.length !== store.changes.length) {
-      store.changes = fileChanges
+    const fileStore = loadActionStore(STORE_FILE)
+    if (fileStore.actions.length !== actionStore.actions.length) {
+      actionStore = fileStore
       clearSeen()
-      restoreSeen(store.changes)
-    } else {
-      for (let i = 0; i < fileChanges.length; i++) {
-        if (fileChanges[i].applied) store.changes[i].applied = true
+      restoreSeen(getLegacyChanges(actionStore))
+      return
+    }
+    for (let i = 0; i < fileStore.actions.length; i++) {
+      if (fileStore.actions[i]?.applied) {
+        actionStore.actions[i].applied = true
       }
     }
   } catch {}
 }
 
-function setChangesFromRecording(changes) {
-  store.changes = changes
+function setChangesFromRecording(changes, meta = {}) {
+  actionStore = compileRecordingToStore(actionStore, changes, meta)
   clearSeen()
-  restoreSeen(store.changes)
+  restoreSeen(getLegacyChanges(actionStore))
   saveStore()
+}
+
+function formatStoreForUi() {
+  const text = formatActionsForMcp(actionStore)
+  if (text) return text
+  return formatChangesFromStore(getLegacyChanges(actionStore))
 }
 
 function sendStats(ws, url = '') {
   syncFromFile()
-  const pending = store.changes.filter(c => !c.applied)
-  const changesText = pending.length === 0 ? '' : formatChangesFromStore(store.changes)
+  const pending = getPendingChanges(actionStore).length
+  const changesText = pending === 0 ? '' : formatStoreForUi()
   const config = loadConfig()
   const cli = getCliHealthForUi(config)
   ws.send(JSON.stringify({
     event: 'stats',
-    total: pending.length,
+    total: pending,
     changesText,
     recording: recordingActive,
     mode: 'record',
@@ -169,7 +188,7 @@ function clearStopWatchdog() {
 
 function clearChangesBuffer({ keepRecording = false } = {}) {
   if (!keepRecording) recordingActive = false
-  store.changes = []
+  actionStore = normalizeStore({})
   clearSeen()
   saveStore()
   // clear-visbug-storage только когда запись НЕ идёт.
@@ -203,8 +222,10 @@ wss.on('connection', (ws) => {
 
       if (msg.event === 'mutations' && LIVE_MUTATIONS_ENABLED) {
         const parsed = parseMutationsToChanges(msg.mutations)
-        store.changes.push(...parsed)
-        if (parsed.length > 0) saveStore()
+        setChangesFromRecording([...getLegacyChanges(actionStore), ...parsed], {
+          sessionId: actionStore.sessionId ?? randomUUID(),
+          workspace: actionStore.workspace,
+        })
       }
 
       if (msg.event === 'popup-ping') {
@@ -283,9 +304,18 @@ wss.on('connection', (ws) => {
         recordingActive = false
         recordingProject = null
         clearStopWatchdog()
-        setChangesFromRecording(msg.changes ?? [])
-        const total = (msg.changes ?? []).filter(c => !c.applied).length
-        process.stderr.write(`[ws-daemon] запись: ${msg.changes?.length ?? 0} правок после diff\n`)
+        const legacyChanges = msg.changes ?? []
+        setChangesFromRecording(legacyChanges, {
+          sessionId: randomUUID(),
+          recordedAt: new Date().toISOString(),
+          workspace: project.workspace,
+          url: msg.url,
+        })
+        const workingChanges = getLegacyChanges(actionStore)
+        const total = getPendingChanges(actionStore).length
+        process.stderr.write(
+          `[ws-daemon] запись: ${actionStore.actions.length} actions (${legacyChanges.length} raw), ${total} pending\n`,
+        )
         broadcast({ event: 'recording-finished', total })
         if (total > 0) broadcast({ event: 'auto-apply-started', total })
         handlePostRecording({
@@ -298,7 +328,8 @@ wss.on('connection', (ws) => {
             total: agentTotal,
             message: `Cursor Agent разбирает ${agentTotal} сложных правок…`,
           }),
-        }, store.changes).then((result) => {
+        }, workingChanges).then((result) => {
+          actionStore = syncAppliedFromLegacy(actionStore, workingChanges)
           saveStore()
           const summary = result.summary
             || (result.applied > 0
