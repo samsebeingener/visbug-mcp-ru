@@ -6,9 +6,10 @@ import { spawn } from 'child_process'
 import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 import { loadConfig, getPromptPath, getStoreDir } from './config.js'
-import { resolveAgentCommand } from './cli-resolver.js'
+import { resolveAgentCommand, resolveDirectAgentEntry } from './cli-resolver.js'
 import { autoApplyWorkspace } from './auto-apply.js'
 import { ensureAgentCli } from '../scripts/ensure-agent-cli.mjs'
+import { createAgentRun, readAgentRunCompletion } from './agent-run.js'
 
 let agentRunning = false
 let lastSpawnAt = 0
@@ -33,9 +34,9 @@ export function readApplyPrompt(config) {
     return readFileSync(promptPath, 'utf8').trim()
   }
   return [
-    'Вызови MCP visbug-mcp get_changes без фильтра.',
-    'Примени правки в workspace по смыслу (CSS/разметка), пропусти артефакты VisBug (cursor, position, transition).',
-    'После записи в файлы вызови apply_changes для применённых индексов.',
+    'Прочитай локальный run-packet с правками VisBug.',
+    'Примени правки в workspace по смыслу (CSS/разметка). Move left/top → transform: translate; width/height пиши даже вместе с Move; пропусти только cursor/position/transition.',
+    'После записи в файлы заверши run через локальный completion script.',
   ].join('\n')
 }
 
@@ -54,7 +55,7 @@ export async function handlePostRecording(meta = {}, changes = []) {
     return { action: 'disabled', spawned: false, reason: 'auto-agent disabled' }
   }
 
-  const workspace = config.autoAgent.workspace?.trim()
+  const workspace = meta.project?.workspace?.trim() || config.autoAgent.workspace?.trim()
   if (!workspace) {
     log('skip: workspace не задан (npm run setup)')
     return { action: 'skipped', spawned: false, reason: 'workspace missing' }
@@ -77,19 +78,24 @@ export async function handlePostRecording(meta = {}, changes = []) {
   }
 
   if (config.autoAgent.spawnCli !== true) {
-    log(`осталось ${remaining} правок — CLI не запускаем (spawnCli=false). /visbug-apply в Cursor`)
+    log(`осталось ${remaining} правок — Cursor Agent CLI выключен (spawnCli=false). Остаток в буфере / /visbug-apply`)
     return {
       action: applyResult.applied > 0 ? 'auto-applied-partial' : 'failed',
       spawned: false,
       ...applyResult,
       remaining,
-      reason: 'use-visbug-apply',
+      reason: 'spawnCli disabled',
     }
   }
 
-  const agentResult = await maybeSpawnAutoAgent({ ...meta, total: remaining }, changes)
+  const agentResult = await maybeSpawnAutoAgent({ ...meta, workspace, total: remaining }, changes)
   if (agentResult.spawned) {
-    return { action: 'agent-spawned', ...applyResult, remaining, ...agentResult }
+    return {
+      action: agentResult.applied > 0 ? 'agent-applied' : 'agent-incomplete',
+      ...applyResult,
+      remaining: remaining - agentResult.applied,
+      ...agentResult,
+    }
   }
 
   if (applyResult.applied > 0) {
@@ -114,8 +120,11 @@ export async function maybeSpawnAutoAgent(meta = {}, changes = []) {
   if (!config.autoAgent?.enabled) {
     return { spawned: false, reason: 'auto-agent disabled' }
   }
+  if (config.autoAgent.spawnCli !== true) {
+    return { spawned: false, reason: 'spawnCli disabled' }
+  }
 
-  const workspace = config.autoAgent.workspace?.trim()
+  const workspace = meta.workspace?.trim() || config.autoAgent.workspace?.trim()
   if (!workspace) {
     log('skip: workspace не задан (npm run setup)')
     return { spawned: false, reason: 'workspace missing' }
@@ -145,12 +154,26 @@ export async function maybeSpawnAutoAgent(meta = {}, changes = []) {
     return { spawned: false, reason: 'cli unavailable' }
   }
 
+  const pendingChanges = changes.filter((change) => !change.applied)
+  const run = createAgentRun({
+    workspace,
+    url: meta.url,
+    changes: pendingChanges,
+    project: meta.project,
+    server: meta.server,
+  })
+  const completeScript = join(config.repoRoot, 'scripts', 'complete-agent-run.mjs')
   const prompt = readApplyPrompt(config)
   const urlNote = meta.url ? `\n\nСтраница записи: ${meta.url}` : ''
-  const countNote = `\n\nВ буфере правок после записи: ${meta.total ?? '?'}.`
-  const fullPrompt = `${prompt}${urlNote}${countNote}`
+  const runNote = [
+    `\n\nRun-packet: ${run.path}`,
+    `Workspace: ${workspace}`,
+    `После успешного применения вызови: node "${completeScript}" --run ${run.runId} --applied <индексы_из_packet> --files <пути_через_запятую>.`,
+  ].join('\n')
+  const fullPrompt = `${prompt}${urlNote}${runNote}`
 
-  const cmd = resolveCursorCli(config)
+  const cmd = cliCheck.command || resolveCursorCli(config)
+  const direct = cliCheck.direct || resolveDirectAgentEntry(cmd)
   lastSpawnAt = now
   agentRunning = true
 
@@ -166,35 +189,46 @@ export async function maybeSpawnAutoAgent(meta = {}, changes = []) {
     env: { ...process.env },
   }
   if (process.platform === 'win32') {
+    // CREATE_NO_WINDOW — без мигающего cmd/powershell
     spawnOpts.creationFlags = 0x08000000
   }
 
   let child
-  if (process.platform === 'win32' && /\.cmd$/i.test(cmd)) {
-    // Без shell: true — иначе на Windows всплывает консоль
-    child = spawn('cmd.exe', ['/c', cmd, ...args], {
-      ...spawnOpts,
-      shell: false,
-    })
+  if (direct?.node && direct?.script) {
+    // Прямой node.exe + index.js: agent.cmd → powershell открывает консоль.
+    child = spawn(direct.node, [direct.script, ...args], spawnOpts)
+  } else if (process.platform === 'win32' && /\.cmd$/i.test(cmd)) {
+    child = spawn('cmd.exe', ['/d', '/c', cmd, ...args], spawnOpts)
   } else {
-    child = spawn(cmd, args, { ...spawnOpts, shell: false })
+    child = spawn(cmd, args, spawnOpts)
   }
 
-  child.on('error', (err) => {
-    agentRunning = false
-    log(`error spawn: ${err.message}`)
+  meta.onAgentStarted?.({ workspace, runId: run.runId, total: pendingChanges.length })
+  log(`spawned: ${direct ? `${direct.node} ${direct.script}` : cmd} workspace=${workspace} changes=${meta.total ?? 0}`)
+  return await new Promise((resolve) => {
+    child.on('error', (err) => {
+      agentRunning = false
+      log(`error spawn: ${err.message}`)
+      resolve({ spawned: false, reason: 'agent spawn failed' })
+    })
+    child.on('close', (code) => {
+      agentRunning = false
+      const completion = readAgentRunCompletion(run)
+      const applied = completion?.appliedIds ?? []
+      for (const index of applied) {
+        if (pendingChanges[index]) pendingChanges[index].applied = true
+      }
+      log(`agent exit code=${code ?? '?'} workspace=${workspace} applied=${applied.length}`)
+      resolve({
+        spawned: true,
+        workspace,
+        command: cmd,
+        runId: run.runId,
+        applied: applied.length,
+        files: completion?.files ?? [],
+        completion: Boolean(completion),
+      })
+    })
+    child.unref()
   })
-
-  child.on('close', (code) => {
-    agentRunning = false
-    const stillPending = changes.filter((c) => !c.applied).length
-    log(`agent exit code=${code ?? '?'} workspace=${workspace} pending=${stillPending}`)
-    if (stillPending > 0) {
-      log(`agent не применил ${stillPending} правок — используйте /visbug-apply в Cursor`)
-    }
-  })
-
-  child.unref()
-  log(`spawned: ${cmd} workspace=${workspace} changes=${meta.total ?? 0}`)
-  return { spawned: true, workspace, command: cmd }
 }

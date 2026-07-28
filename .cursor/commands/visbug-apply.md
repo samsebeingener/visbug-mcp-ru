@@ -30,4 +30,4 @@ description: VisBug MCP — применить оставшиеся правки
 - Репо моста: `projects/visbug-mcp-ru`
 - Буфер: `~/.visbug-mcp/changes.json`
 - Лог auto-apply: `~/.visbug-mcp/auto-apply.log`
-- Headless CLI (`spawnCli`) по умолчанию **выключен** — это норма, терминал не открывается.
+- Cursor Agent fallback запускается автоматически только для сложного остатка и не открывает терминал.

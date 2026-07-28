@@ -46,8 +46,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     const action = msg.type === 'visbug-recording-start' ? 'start' : 'stop'
 
     ;(async () => {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      const tab = tabs[0]
+      const tab = Number.isInteger(msg.tabId)
+        ? await chrome.tabs.get(msg.tabId)
+        : (await chrome.tabs.query({ active: true, currentWindow: true }))[0]
       if (!tab?.id) {
         sendResponse({ ok: false, error: 'Нет активной вкладки.' })
         return
@@ -68,7 +69,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
 
       const result = await sendToTab(tab.id, { type: 'visbug-recording', action })
-      sendResponse(result)
+      sendResponse({ ...result, url: tab.url })
     })()
 
     return true

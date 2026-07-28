@@ -51,7 +51,7 @@ Windows: `%LOCALAPPDATA%\cursor-agent\agent.cmd`
 npm run health
 ```
 
-Popup: зелёная точка = демон online.
+Popup: зелёная точка = Bridge daemon online. MCP в Cursor для записи не требуется.
 
 ## Как работает после «Стоп»
 
@@ -60,9 +60,9 @@ Popup: зелёная точка = демон online.
        ↓
   auto-apply (без LLM) → CSS/текст в файлы workspace
        ↓
-  остались правки? → да → headless `agent -p` (если CLI установлен)
+  остались правки? → да → Cursor Agent CLI читает локальный run-packet
        ↓
-  нет CLI → часть правок остаётся в буфере (popup / get_changes)
+  нет CLI → часть правок остаётся в буфере, popup покажет точную причину
 ```
 
 Конфиг: `~/.visbug-mcp/config.json`  
@@ -70,7 +70,7 @@ Popup: зелёная точка = демон online.
 
 ## Ежедневно
 
-`npm run dev` → VisBug → popup **Начать запись** → правки → **Стоп** → смотри diff в редакторе.
+`npm run dev` → VisBug → popup проверяет выбранный проект → **Начать запись** → правки → **Стоп** → смотри diff в редакторе.
 
 Команды в чате Cursor **не обязательны**.
 
@@ -80,6 +80,6 @@ Popup: зелёная точка = демон online.
 |---------|---------|
 | Красная точка | `scripts/start-ws-daemon.ps1` |
 | Нет правок | F5 → снова Запись → Стоп |
-| ○ CLI agent — не нужен | Норма, если CSS применился |
+| Cursor Agent fallback готов | Сложный остаток будет обработан автоматически |
 | Сложные правки не в файлах | `npm run ensure-cli`, `agent login` |
 | MCP не видит tools | Reload Window |

@@ -20,9 +20,10 @@ export const DEFAULT_CONFIG = {
     enabled: false,
     workspace: '',
     useForce: true,
-    /** headless `agent` после «Стоп» — по умолчанию ВЫКЛ (мигает терминал на Windows). */
+    /** headless Cursor Agent для остатка — ВЫКЛ по умолчанию (на Windows мигает консоль). */
     spawnCli: false,
   },
+  projects: [],
   cursorCli: 'agent',
 }
 
@@ -41,11 +42,20 @@ export function loadConfig() {
   }
   try {
     const raw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
-    return {
+    const config = {
       ...DEFAULT_CONFIG,
       ...raw,
       autoAgent: { ...DEFAULT_CONFIG.autoAgent, ...(raw.autoAgent ?? {}) },
     }
+    if (!Array.isArray(raw.projects) && config.autoAgent.workspace) {
+      config.projects = [{
+        id: 'legacy-default',
+        name: 'Текущий проект',
+        workspace: config.autoAgent.workspace,
+        origins: [],
+      }]
+    }
+    return config
   } catch {
     return { ...DEFAULT_CONFIG, autoAgent: { ...DEFAULT_CONFIG.autoAgent } }
   }

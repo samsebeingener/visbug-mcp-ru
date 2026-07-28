@@ -151,6 +151,14 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
   const beforeMap = new Map(beforeEntries.map((e) => [e.selector, e]))
   const changes = []
 
+  const isDecorativeNoise = (property, selector) => {
+    if (property === '--start' || property === '--glow-mask') return true
+    if (String(property).startsWith('--') && /editorial-card-glow|pointer-events-none/i.test(selector)) {
+      return true
+    }
+    return false
+  }
+
   for (const after of afterEntries) {
     const before = beforeMap.get(after.selector)
     if (!before) continue
@@ -160,6 +168,7 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
       const oldValue = before.styles[property] ?? null
       const newValue = after.styles[property] ?? null
       if (oldValue === newValue) continue
+      if (isDecorativeNoise(property, after.selector)) continue
 
       changes.push({
         type: 'style',

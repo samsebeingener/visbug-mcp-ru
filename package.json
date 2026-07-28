@@ -1,8 +1,8 @@
 {
   "name": "visbug-mcp-ru",
-  "version": "0.6.15",
+  "version": "0.6.36",
   "type": "module",
-  "description": "Локальный MCP-мост VisBug → Cursor: захват DOM-правок на localhost",
+  "description": "Self-service VisBug Bridge: localhost проекты, auto-apply и Cursor Agent fallback",
   "author": "Nikita Kulikov <https://samsebeingener.ru>",
   "repository": {
     "type": "git",
@@ -19,6 +19,7 @@
     "icons": "python scripts/generate-extension-icons.py",
     "ensure-cli": "node scripts/ensure-agent-cli.mjs",
     "health": "node scripts/health-check.mjs",
+    "test": "node --test test/*.test.js",
     "update": "node scripts/update.mjs",
     "postinstall": "node scripts/ensure-agent-cli.mjs || exit 0"
   },

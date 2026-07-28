@@ -13,6 +13,7 @@ import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { saveConfig, loadConfig } from '../src/config.js'
 import { ensureAgentCli } from './ensure-agent-cli.mjs'
+import { normalizeOrigin } from '../src/projects.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '..')
@@ -20,11 +21,13 @@ const MCP_FILE = join(homedir(), '.cursor', 'mcp.json')
 const SERVER_JS = join(REPO_ROOT, 'src', 'server.js').replace(/\\/g, '/')
 
 function parseArgs(argv) {
-  const out = { yes: false, workspace: '' }
+  const out = { yes: false, workspace: '', origin: '', name: '' }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--yes' || a === '-y') out.yes = true
     else if (a === '--workspace' || a === '-w') out.workspace = resolve(argv[++i] || '')
+    else if (a === '--origin') out.origin = normalizeOrigin(argv[++i] || '')
+    else if (a === '--name') out.name = argv[++i] || ''
   }
   return out
 }
@@ -45,8 +48,8 @@ function mergeMcpConfig() {
       }
       if (!data.mcpServers) data.mcpServers = {}
     } catch {
-      console.warn('⚠️  Не удалось прочесть mcp.json — будет создан новый фрагмент.')
-      data = { mcpServers: {} }
+      console.warn('⚠️  Не удалось прочесть mcp.json — MCP не изменён, чтобы не потерять другие регистрации.')
+      return false
     }
   }
 
@@ -57,6 +60,7 @@ function mergeMcpConfig() {
 
   writeFileSync(MCP_FILE, JSON.stringify(data, null, 2), 'utf8')
   console.log(`✅ MCP: запись visbug-mcp в ${MCP_FILE}`)
+  return true
 }
 
 function startDaemon() {
@@ -84,6 +88,8 @@ async function main() {
 
   let workspace = args.workspace
   let enableAuto = args.yes
+  let origin = args.origin
+  let projectName = args.name
 
   if (!args.yes) {
     const rl = createInterface({ input: process.stdin, output: process.stdout })
@@ -92,6 +98,15 @@ async function main() {
       'Путь к проекту сайта (workspace для auto-agent после «Стоп», Enter = пропустить): ',
     )
     workspace = workspaceRaw.trim() ? resolve(workspaceRaw.trim()) : workspace
+    if (workspace) {
+      const originRaw = await ask(
+        rl,
+        'Адрес dev-сервера для этого проекта (например http://localhost:3001): ',
+      )
+      origin = normalizeOrigin(originRaw)
+      const nameRaw = await ask(rl, 'Название проекта для popup (Enter = имя папки): ')
+      projectName = nameRaw.trim()
+    }
 
     const autoAnswer = await ask(
       rl,
@@ -106,16 +121,36 @@ async function main() {
   if (workspace && !existsSync(workspace)) {
     console.warn(`⚠️  Папка не найдена: ${workspace}`)
   }
+  if (workspace && !origin) {
+    console.warn('⚠️  Origin не указан: проект не будет включён для записи. Добавьте --origin http://localhost:PORT.')
+  }
 
+  const previous = loadConfig()
+  const projects = Array.isArray(previous.projects) ? [...previous.projects] : []
+  if (workspace && origin) {
+    const project = {
+      id: workspace,
+      name: projectName || workspace.split(/[\\/]/).filter(Boolean).pop(),
+      workspace,
+      origins: [origin],
+    }
+    const existingIndex = projects.findIndex((item) => item.workspace === workspace || item.origins?.includes(origin))
+    if (existingIndex >= 0) projects[existingIndex] = project
+    else projects.push(project)
+  }
   const config = {
-    ...loadConfig(),
-    version: 1,
+    ...previous,
+    version: 2,
     repoRoot: REPO_ROOT,
     autoAgent: {
-      enabled: enableAuto && Boolean(workspace),
-      workspace: workspace || '',
+      enabled: workspace
+        ? enableAuto && Boolean(origin)
+        : Boolean(previous.autoAgent?.enabled),
+      workspace: workspace || previous.autoAgent?.workspace || '',
       useForce: true,
+      spawnCli: false,
     },
+    projects,
     cursorCli: 'agent',
   }
   saveConfig(config)
@@ -155,8 +190,9 @@ async function main() {
   console.log('3. Cursor → Reload Window\n')
 
   if (config.autoAgent.enabled) {
-    console.log(`Auto-agent: ВКЛ → ${workspace}`)
-    console.log('Цикл: Запись → правки VisBug → Стоп → агент сам пишет в файлы.')
+    console.log(`Auto-apply: ВКЛ → ${workspace}`)
+    console.log(`Origin: ${origin || 'не задан — добавьте через npm run setup'}`)
+    console.log('Цикл: Запись → auto-apply → Cursor Agent для сложного остатка.')
     console.log('Лог: ~/.visbug-mcp/agent-runs.log\n')
   } else {
     console.log('Auto-agent: ВЫКЛ. Запустите npm run setup с путём к проекту.\n')

@@ -1,58 +1,31 @@
 ---
-description: VisBug MCP — шпаргалка и диагностика (v0.6.3)
+description: Запустить VisBug Bridge и выбрать проект для записи
 ---
 
-# VisBug MCP — для пользователя
+# VisBug Bridge — старт проекта
 
-**Ответь коротко, по-русски, 5–8 строк.** Не вываливай фазы установки, если пользователь уже работает.
+Работай по-русски. Сначала проверь Bridge и уже запущенные localhost-проекты, затем задай пользователю один вопрос через форму выбора.
 
-## Что это
+## Обязательный порядок
 
-VisBug в Chrome → правишь сайт визуально → **Стоп** в popup → правки **сами попадают в файлы** проекта. **Команды в чате не нужны.**
+1. В `projects/visbug-mcp-ru` запусти `npm run health`. Если daemon offline — запусти `scripts/start-ws-daemon.ps1`.
+2. Проверь доступность Cursor Agent CLI через health.
+3. Проверь текущие localhost-порты и `~/.visbug-mcp/config.json`.
+4. Спроси пользователя:
+   - **Работать с запущенным проектом** — покажи только реальные запущенные localhost URL и зарегистрированные папки.
+   - **Поднять новый проект** — попроси путь к папке и желаемый localhost-порт.
+5. Для нового проекта:
+   - определи Next/static HTML;
+   - не выполняй `npm install` сам: если нет `node_modules`, объясни ситуацию и спроси подтверждение в чате;
+   - запусти подходящий dev-server (`npm run dev` для приложения либо локальный static server для `index.html`);
+   - зарегистрируй точный origin и workspace в `~/.visbug-mcp/config.json`, не трогая другие проекты.
+6. Подтверди URL, имя папки, тип проекта и готовность записи. Напомни: popup → «Начать запись» → VisBug → «Стоп».
 
-**Cursor Agent CLI** (`agent`) — **опционально**: если auto-apply не смог применить сложные правки, headless agent добивает остаток. Установка: `npm run ensure-cli`, `agent login`.
+## Правила безопасности
 
-## Ежедневный цикл
+- Не убивай и не перезапускай чужие dev-серверы.
+- Не регистрируй origin, если он уже назначен другой папке.
+- Не говори, что правки применены, пока Bridge не прислал подтверждённый результат.
+- MCP не блокирует запись; он нужен только для ручного доступа к буферу.
 
-1. `npm run dev` в `frontend-new`
-2. Popup visbug-mcp: **зелёная точка** (демон запущен)
-3. VisBug → popup **Начать запись** (буфер очищается автоматически) → правки → **Стоп**
-4. В popup: «Готово: N правок в файлы» — смотри diff в редакторе
-
-**Обновление:** раз в сутки при «Начать запись» popup покажет новую версию → в Cursor: `/visbug-mcp-update`.
-
-**Важно:** жми **Стоп** до закрытия VisBug.
-
-## Если сломалось
-
-| Симптом | Что сделать |
-|---------|-------------|
-| Красная точка | `powershell -ExecutionPolicy Bypass -File projects/visbug-mcp-ru/scripts/start-ws-daemon.ps1` |
-| Нет правок | F5 на localhost → снова Запись → правки → Стоп |
-| ○ CLI agent — не нужен | Норма, если всё применилось в файлы |
-| Сложные правки не в файлах | `npm run ensure-cli` → `agent login` |
-| MCP не видит tools | Cursor → Reload Window |
-| Есть обновление visbug-mcp | `/visbug-mcp-update` в Cursor |
-
-## Chrome (один раз)
-
-- **VisBug:** https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc
-- **Страница расширений:** вставь в адресную строку Chrome `chrome://extensions`
-- **Папка visbug-mcp:** `projects/visbug-mcp-ru/extension` (полный путь — в выводе `npm run setup` или в popup visbug-mcp)
-
-Полный сброс: `cd projects/visbug-mcp-ru && npm run setup`
-
----
-
-## Для агента (не показывать пользователю целиком)
-
-Пути Никиты (если workspace = Cursor root):
-
-- Репо: `projects/visbug-mcp-ru`
-- Сайт: `projects/samsebeingener-web/frontend-new`
-- Расширение: `projects/visbug-mcp-ru/extension`
-- Логи: `~/.visbug-mcp/auto-apply.log`, `~/.visbug-mcp/agent-runs.log`
-
-**Не предлагай** `get_changes` как основной путь. CLI предлагай только если auto-apply не справился или пользователь просит fallback.
-
-По запросу: проверь `npm run health`, перезапусти демон, версию расширения **0.6.3+**.
+Если popup пишет «проект не назначен», пользователь запускает эту команду повторно.

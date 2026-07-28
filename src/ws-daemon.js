@@ -9,6 +9,8 @@ import { loadConfig } from './config.js'
 import { handlePostRecording } from './auto-agent.js'
 import { getCliHealthForUi } from './cli-resolver.js'
 import { checkForUpdatesIfDue } from './update-check.js'
+import { detectWorkspaceLayout } from './auto-apply.js'
+import { getProjects, resolveProjectForUrl } from './projects.js'
 import { execSync } from 'child_process'
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { homedir } from 'os'
@@ -21,6 +23,7 @@ const LIVE_MUTATIONS_ENABLED = false
 
 const store = { changes: [] }
 let recordingActive = false
+let recordingProject = null
 let stopWatchdog = null
 const STOP_TIMEOUT_MS = 4000
 
@@ -68,22 +71,27 @@ function setChangesFromRecording(changes) {
   saveStore()
 }
 
-function sendStats(ws) {
+function sendStats(ws, url = '') {
   syncFromFile()
   const pending = store.changes.filter(c => !c.applied)
   const changesText = pending.length === 0 ? '' : formatChangesFromStore(store.changes)
   const config = loadConfig()
+  const cli = getCliHealthForUi(config)
   ws.send(JSON.stringify({
     event: 'stats',
     total: pending.length,
     changesText,
     recording: recordingActive,
     mode: 'record',
-    health: buildHealthSnapshot(config),
+    health: {
+      ...buildHealthSnapshot(config, url),
+      cursorCli: cli.ok,
+      cursorCliCommand: cli.command,
+    },
   }))
 }
 
-function buildHealthSnapshot(config) {
+function buildHealthSnapshot(config, url = '') {
   const mcpPath = join(homedir(), '.cursor', 'mcp.json')
   let mcpOk = false
   try {
@@ -95,11 +103,22 @@ function buildHealthSnapshot(config) {
     }
   } catch {}
 
+  const routing = resolveProjectForUrl(config, url)
+  const targetProject = routing.project
+  const workspaceKind = targetProject ? detectWorkspaceLayout(targetProject.workspace) : 'unknown'
   return {
     autoAgentEnabled: Boolean(config.autoAgent?.enabled),
     spawnCli: config.autoAgent?.spawnCli === true,
     workspace: config.autoAgent?.workspace || '',
     mcpConfigured: mcpOk,
+    mcpOptional: true,
+    projects: getProjects(config).map(({ id, name, origins }) => ({ id, name, origins })),
+    targetProject: targetProject
+      ? { id: targetProject.id, name: targetProject.name, workspace: targetProject.workspace, origin: routing.origin }
+      : null,
+    targetProjectReason: routing.reason,
+    workspaceKind,
+    autoApplyReady: Boolean(config.autoAgent?.enabled && targetProject && workspaceKind !== 'unknown'),
     repoRoot: config.repoRoot || '',
     extensionPath: config.repoRoot ? join(config.repoRoot, 'extension') : '',
     visbugStoreUrl:
@@ -153,7 +172,11 @@ function clearChangesBuffer({ keepRecording = false } = {}) {
   store.changes = []
   clearSeen()
   saveStore()
-  broadcast({ event: 'clear-visbug-storage' })
+  // clear-visbug-storage только когда запись НЕ идёт.
+  // На старте записи keepRecording=true — иначе content-script сносит badge и snapshot «до».
+  if (!keepRecording) {
+    broadcast({ event: 'clear-visbug-storage' })
+  }
   const config = loadConfig()
   broadcast({
     event: 'stats',
@@ -168,6 +191,7 @@ function clearChangesBuffer({ keepRecording = false } = {}) {
 
 function failRecording(message) {
   recordingActive = false
+  recordingProject = null
   clearStopWatchdog()
   broadcast({ event: 'recording-error', message })
 }
@@ -184,7 +208,7 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.event === 'popup-ping') {
-        sendStats(ws)
+        sendStats(ws, msg.url)
       }
 
       if (msg.event === 'popup-health') {
@@ -192,7 +216,7 @@ wss.on('connection', (ws) => {
         const cli = getCliHealthForUi(config)
         ws.send(JSON.stringify({
           event: 'health',
-          ...buildHealthSnapshot(config),
+          ...buildHealthSnapshot(config, msg.url),
           cursorCli: cli.ok,
           cursorCliCommand: cli.command,
         }))
@@ -200,9 +224,23 @@ wss.on('connection', (ws) => {
 
       if (msg.event === 'popup-recording-start') {
         clearStopWatchdog()
+        const routing = resolveProjectForUrl(loadConfig(), msg.url)
+        if (!routing.project) {
+          ws.send(JSON.stringify({
+            event: 'recording-error',
+            message: routing.reason === 'origin-unmapped'
+              ? `Для ${routing.origin || 'этой страницы'} не назначена папка проекта. Запустите npm run setup и добавьте origin.`
+              : 'Не удалось определить адрес страницы для записи.',
+          }))
+          return
+        }
         clearChangesBuffer({ keepRecording: true })
         recordingActive = true
-        ws.send(JSON.stringify({ event: 'recording-armed' }))
+        recordingProject = routing.project
+        ws.send(JSON.stringify({
+          event: 'recording-armed',
+          project: { name: routing.project.name, workspace: routing.project.workspace, origin: routing.origin },
+        }))
         const config = loadConfig()
         checkForUpdatesIfDue(config).then((u) => {
           if (u.notify && u.updateAvailable) {
@@ -232,54 +270,94 @@ wss.on('connection', (ws) => {
       }
 
       if (msg.event === 'recording-result') {
+        if (!recordingActive || !recordingProject) {
+          process.stderr.write('[ws-daemon] ignored recording-result outside active session\n')
+          return
+        }
+        const route = resolveProjectForUrl(loadConfig(), msg.url)
+        if (route.project?.id !== recordingProject.id) {
+          failRecording('Адрес результата не совпадает с проектом активной записи. Правки не применены.')
+          return
+        }
+        const project = recordingProject
         recordingActive = false
+        recordingProject = null
         clearStopWatchdog()
         setChangesFromRecording(msg.changes ?? [])
         const total = (msg.changes ?? []).filter(c => !c.applied).length
         process.stderr.write(`[ws-daemon] запись: ${msg.changes?.length ?? 0} правок после diff\n`)
         broadcast({ event: 'recording-finished', total })
-        handlePostRecording({ total, url: msg.url }, store.changes).then((result) => {
+        if (total > 0) broadcast({ event: 'auto-apply-started', total })
+        handlePostRecording({
+          total,
+          url: msg.url,
+          project,
+          onAgentStarted: ({ workspace, total: agentTotal }) => broadcast({
+            event: 'agent-fallback-started',
+            workspace,
+            total: agentTotal,
+            message: `Cursor Agent разбирает ${agentTotal} сложных правок…`,
+          }),
+        }, store.changes).then((result) => {
           saveStore()
+          const summary = result.summary
+            || (result.applied > 0
+              ? `Готово: ${result.applied} в файлы`
+              : `Не применено: ${result.remaining ?? total}`)
+          const payload = {
+            applied: result.applied ?? 0,
+            skipped: result.skipped ?? 0,
+            artifacts: result.artifacts ?? 0,
+            remaining: result.remaining ?? 0,
+            files: result.files ?? [],
+            writes: result.writes ?? [],
+            failed: result.failed ?? [],
+            summary,
+            message: summary,
+          }
           if (result.action === 'auto-applied') {
-            broadcast({
-              event: 'auto-applied',
-              applied: result.applied,
-              skipped: result.skipped,
-              files: result.files,
-              remaining: 0,
-            })
+            broadcast({ event: 'auto-applied', ...payload, remaining: 0 })
           } else if (result.action === 'auto-applied-partial') {
             broadcast({
               event: 'apply-incomplete',
-              applied: result.applied,
-              remaining: result.remaining,
-              message: `В файлы: ${result.applied}. Осталось ${result.remaining} → /visbug-apply в Cursor (без терминала)`,
+              ...payload,
+              message: `${summary}\n\nОсталось ${result.remaining} → /visbug-apply в Cursor`,
             })
           } else if (result.spawned) {
             broadcast({
-              event: 'auto-agent-started',
+              event: 'agent-fallback-finished',
               workspace: result.workspace,
               total: result.remaining ?? total,
-              message: 'Агент обрабатывает остаток в фоне…',
+              applied: result.applied ?? 0,
+              files: result.files ?? [],
+              completion: result.completion === true,
+              summary,
+              message: result.completion
+                ? `${summary}\n\nCursor Agent подтвердил ${result.applied ?? 0} правок.`
+                : `${summary}\n\nCursor Agent без подтверждённого отчёта.`,
             })
           } else if (result.action === 'failed') {
             broadcast({
               event: 'apply-incomplete',
-              applied: result.applied ?? 0,
+              ...payload,
               remaining: result.remaining ?? total,
-              message: `Не применено: ${result.remaining ?? total}. Cursor → /visbug-apply (терминал не нужен)`,
+              message: summary || `Не применено: ${result.remaining ?? total}. Cursor → /visbug-apply`,
             })
           } else if (result.action === 'disabled') {
             broadcast({
               event: 'auto-agent-skipped',
               reason: 'auto-agent выключен (npm run setup)',
               total,
+              summary,
+              message: summary,
             })
           } else {
             broadcast({
               event: 'auto-agent-skipped',
               reason: result.reason ?? result.agentReason ?? 'пропущено',
               total,
+              summary,
+              message: summary || result.reason,
             })
           }
         }).catch((err) => {
@@ -288,6 +366,7 @@ wss.on('connection', (ws) => {
             event: 'apply-incomplete',
             applied: 0,
             remaining: total,
+            summary: `❌ Ошибка auto-apply: ${err.message}`,
             message: `Ошибка auto-apply: ${err.message}. Попробуйте /visbug-apply в Cursor.`,
           })
         })
@@ -299,6 +378,7 @@ wss.on('connection', (ws) => {
 
       if (msg.event === 'popup-recording-cancel') {
         recordingActive = false
+        recordingProject = null
         clearStopWatchdog()
         sendStats(ws)
       }

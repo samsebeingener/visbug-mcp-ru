@@ -54,7 +54,7 @@ npm install
 npm run setup
 ```
 
-`npm run setup` — путь к проекту сайта, MCP в Cursor, демон, **auto-apply** после «Стоп».
+`npm run setup` — добавляет проект и его `localhost` origin, запускает Bridge daemon и настраивает **auto-apply** после «Стоп». MCP в Cursor создаётся для ручного доступа, но запись от него не зависит.
 
 **Cursor Agent CLI** (опционально, для сложных правок): `npm run ensure-cli` → `agent login`. На Windows ставится в `%LOCALAPPDATA%\cursor-agent\agent.cmd`.
 
@@ -124,19 +124,29 @@ C:\Users\you\projects\visbug-mcp-ru\extension
 
 ### Режим «Запись» (v0.6.2+)
 
-1. `npm run dev` → откройте сайт на `http://localhost:…` в Chrome
-2. Popup: **зелёная точка** (демон online) → **Начать запись**
-3. Правки в VisBug (стили, текст, layout)
-4. **Стоп — завершить запись**
+1. Запустите сайт и откройте `http://localhost:…` в Chrome.
+2. В Cursor запустите `/visbug-mcp-start`: команда спросит, использовать уже запущенный localhost-проект или поднять новый.
+3. Popup на нужной localhost-странице покажет статус **Bridge daemon готов**, выбранный проект и auto-apply → **Начать запись**.
+4. Правки в VisBug (стили, текст, layout).
+5. **Стоп — завершить запись**.
 
 **После «Стоп» команды в чате не нужны:**
 
-1. **auto-apply** — демон сам пишет простые правки в файлы проекта (CSS, текст в `.tsx`)
-2. **fallback LLM** — если что-то не применилось и установлен `agent`, headless Cursor CLI добивает остаток
+1. **auto-apply** — Bridge сам пишет безопасные правки в исходники: CSS и текст в `src/` для приложений; CSS в `<style>` и уникальный видимый текст в корневой `index.html` для статичных лендингов.
+2. **Cursor Agent fallback** — если остаётся сложная правка, Bridge скрытно запускает Cursor Agent CLI. Агент читает локальный run-packet и подтверждает только реально применённые изменения.
+3. **MCP** — необязательный ручной доступ из Cursor к буферу правок; не нужен для записи и fallback.
 
 Логи: `~/.visbug-mcp/auto-apply.log`, `~/.visbug-mcp/agent-runs.log`
 
 **Важно:** жмите **Стоп** до закрытия VisBug.
+
+### Статичные HTML-лендинги
+
+Для проектов с корневым `index.html` auto-apply включается автоматически: стили сохраняются в существующий блок `<style>`, а уникальный текст — прямо в `index.html`. Запустите лендинг через localhost, затем зарегистрируйте папку и origin командой `/visbug-mcp-start`. Если один и тот же текст повторяется несколько раз или CSS-правка требует изменения классов Tailwind, её обработает Cursor Agent fallback.
+
+### Несколько проектов
+
+Bridge сопоставляет точный origin с папкой проекта. Например: `http://localhost:3001` → Next-проект, `http://localhost:3002` → статичный лендинг. В popup всегда видны выбранные папка и тип исходников; если origin не зарегистрирован, запись блокируется вместо риска записать правки в другой проект.
 
 ### Запасной путь (ручной)
 
@@ -149,8 +159,8 @@ C:\Users\you\projects\visbug-mcp-ru\extension
 
 | Индикатор | Значение |
 |---|---|
-| 🟢 Подключено к MCP-серверу | Демон онлайн |
-| 🔴 MCP-сервер не запущен | Перезапустите `start-ws-daemon.ps1` |
+| 🟢 Bridge daemon готов | Можно начать запись |
+| 🔴 Bridge daemon не запущен | Перезапустите `start-ws-daemon.ps1` |
 | ✓ Запись в файлы после Стоп | auto-apply включён, workspace задан |
 | ○ CLI agent — не нужен | Норма: CSS уже пишется без CLI |
 | ✓ CLI agent (доп.) | Fallback LLM для сложных правок |
@@ -205,7 +215,7 @@ Live-мутации **выключены намеренно** — иначе Vis
 2. Правки в VisBug
 3. «Стоп» — снимок «после», diff → `changes.json`
 4. `auto-apply.js` пишет простые CSS/текст в workspace
-5. Остаток — `/visbug-apply` в Cursor (без терминала, `spawnCli: false`)
+5. Сложный остаток — Cursor Agent CLI скрытно обрабатывает run-packet и подтверждает применённые файлы
 
 ### Дедупликация
 

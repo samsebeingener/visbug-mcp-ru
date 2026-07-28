@@ -8,6 +8,8 @@ const count = document.getElementById('count')
 const hint = document.getElementById('hint')
 const updateBanner = document.getElementById('update-banner')
 const healthEl = document.getElementById('health')
+const projectEl = document.getElementById('project')
+const pipelineEl = document.getElementById('pipeline')
 const installHintEl = document.getElementById('install-hint')
 const recordBtn = document.getElementById('record-btn')
 const clearBtn = document.getElementById('clear-btn')
@@ -18,6 +20,24 @@ let reconnectTimer = null
 let cachedChangesText = ''
 let recording = false
 let connected = false
+let activePageUrl = ''
+let activeTabId = null
+let lastHealth = null
+
+function persistRecordingState(active) {
+  chrome.storage.session.set({ visbugBridgeRecording: active })
+}
+
+chrome.storage.session.get('visbugBridgeRecording').then(({ visbugBridgeRecording }) => {
+  if (visbugBridgeRecording === true) setRecording(true)
+})
+
+async function refreshActivePageUrl() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+  activeTabId = tabs[0]?.id ?? null
+  activePageUrl = tabs[0]?.url ?? ''
+  return activePageUrl
+}
 
 function wsSend(payload) {
   if (connected && ws?.readyState === WebSocket.OPEN) {
@@ -26,29 +46,38 @@ function wsSend(payload) {
 }
 
 function setOfflineUi() {
+  // Popup закрывается → WebSocket рвётся. Это НЕ остановка записи.
+  // Нельзя сбрасывать recording / storage, иначе при повторном открытии
+  // кажется, что запись «отменилась».
   connected = false
-  setRecording(false)
-  dot.className = 'dot off'
-  statusEl.textContent = 'MCP-сервер не запущен'
-  count.textContent = 'В буфере правок: 0'
+  if (recording) {
+    dot.className = 'dot rec'
+    statusEl.textContent = 'Идёт запись… (переподключение к Bridge)'
+    recordBtn.textContent = 'Стоп — завершить запись'
+    recordBtn.classList.add('recording')
+  } else {
+    dot.className = 'dot off'
+    statusEl.textContent = 'Bridge daemon не запущен'
+  }
+  projectEl.textContent = 'Запустите Bridge daemon, затем откройте popup снова.'
   renderHealth(null)
-  recordBtn.disabled = true
+  if (!recording) recordBtn.disabled = true
   clearBtn.disabled = true
   copyBtn.disabled = true
-  cachedChangesText = ''
 }
 
 function setRecording(active) {
   recording = active
+  persistRecordingState(active)
   recordBtn.textContent = active ? 'Стоп — завершить запись' : 'Начать запись'
   recordBtn.classList.toggle('recording', active)
   dot.className = active ? 'dot rec' : (connected ? 'dot on' : 'dot off')
   statusEl.textContent = active
     ? 'Идёт запись… правьте в VisBug'
-    : (connected ? 'Подключено к MCP-серверу' : 'MCP-сервер не запущен')
+    : (connected ? 'Bridge готов к записи' : 'Bridge daemon не запущен')
   hint.classList.toggle('show', active)
   if (active) {
-    hint.textContent = 'REC на странице. Стили и текст. Жмите Стоп — правки уйдут в файлы.'
+    hint.textContent = 'REC на странице. После «Стоп» Bridge сначала применит безопасные правки, затем Cursor Agent разберёт остаток.'
   }
 }
 
@@ -73,6 +102,14 @@ function hideUpdateBanner() {
 
 function renderInstallHint(h) {
   if (!installHintEl) return
+  if (!h) {
+    installHintEl.innerHTML = [
+      '<strong>Запуск Bridge daemon</strong><br>',
+      'В PowerShell из папки visbug-mcp-ru:<br>',
+      '<code>powershell -ExecutionPolicy Bypass -File scripts/start-ws-daemon.ps1</code>',
+    ].join('')
+    return
+  }
   const store = h?.visbugStoreUrl
     || 'https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc'
   const extPage = h?.chromeExtensionsUrl || 'chrome://extensions'
@@ -88,48 +125,56 @@ function renderInstallHint(h) {
   ].join('')
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
 function renderHealth(h) {
   if (!healthEl) return
   if (!h) {
-    healthEl.textContent = 'Демон offline — npm run setup или start-ws-daemon.ps1'
+    healthEl.textContent = 'Bridge daemon offline — npm run setup или start-ws-daemon.ps1'
     renderInstallHint(null)
     return
   }
+  lastHealth = h
   renderInstallHint(h)
   const line = (ok, label, neutral = false) => {
     const cls = ok ? 'ok' : (neutral ? 'opt' : 'bad')
     const mark = ok ? '✓' : (neutral ? '○' : '✗')
     return `<span class="${cls}">${mark}</span> ${label}`
   }
-  const wsPath = h.workspace ? (h.workspace.length > 28 ? `…${h.workspace.slice(-26)}` : h.workspace) : 'не задан'
-  const fileApplyOk = Boolean(h.autoAgentEnabled && h.workspace)
+  const target = h.targetProject
+  const targetName = target?.name || 'не назначен'
+  const targetPath = target?.workspace
+    ? (target.workspace.length > 32 ? `…${target.workspace.slice(-30)}` : target.workspace)
+    : 'для этого localhost'
+  const fileApplyOk = Boolean(h.autoApplyReady)
   const lines = [
-    line(true, 'Демон'),
-    line(h.mcpConfigured, 'MCP в Cursor'),
-    line(fileApplyOk, `Запись в файлы после Стоп → ${wsPath}`),
+    line(true, 'Bridge daemon'),
+    line(fileApplyOk, `Auto-apply → ${escapeHtml(targetName)}`),
+    line(h.cursorCli, h.cursorCli ? 'Cursor Agent fallback готов' : 'Cursor Agent fallback недоступен', !h.cursorCli),
+    line(h.mcpConfigured, h.mcpConfigured ? 'Cursor MCP подключён (ручной доступ)' : 'Cursor MCP не подключён (не обязателен)', !h.mcpConfigured),
   ]
-  if (h.cursorCli && h.spawnCli) {
-    const cliLabel = h.cursorCliCommand
-      ? `CLI ${h.cursorCliCommand} (фон)`
-      : 'CLI agent (фон)'
-    lines.push(line(true, cliLabel))
-  } else if (fileApplyOk) {
-    lines.push(line(false, 'CLI не запускается — остаток через /visbug-apply', true))
-  } else if (h.cursorCli) {
-    lines.push(line(true, 'CLI установлен (не используется)'))
-  } else {
-    lines.push(line(false, 'CLI agent не установлен', true))
-  }
   healthEl.innerHTML = lines.join('<br>')
+  projectEl.innerHTML = target
+    ? `<strong>Текущий проект:</strong> ${escapeHtml(targetName)}<br><span>${escapeHtml(target.origin)}</span><br><code>${escapeHtml(targetPath)}</code><br><span>${h.workspaceKind === 'static-html' ? 'Static HTML: index.html' : 'Приложение: src/'}</span>`
+    : '<strong>Проект не назначен.</strong><br>В Cursor запустите <code>/visbug-mcp-start</code>: команда спросит, использовать запущенный проект или поднять новый.'
+  recordBtn.disabled = recording ? !connected : (!connected || !fileApplyOk)
 }
 
 function refreshHealth() {
-  wsSend({ event: 'popup-health' })
+  wsSend({ event: 'popup-health', url: activePageUrl })
 }
 
-function refreshStats() {
+async function refreshStats() {
+  await refreshActivePageUrl()
   if (connected) {
-    wsSend({ event: 'popup-ping' })
+    wsSend({ event: 'popup-ping', url: activePageUrl })
     refreshHealth()
   }
 }
@@ -165,26 +210,55 @@ function connectWs() {
         if (data.message) statusEl.textContent = data.message
       }
       if (data.event === 'stats') {
-        count.textContent = `В буфере правок: ${data.total}`
+        count.textContent = `Правок текущей записи: ${data.total}`
         cachedChangesText = data.changesText ?? ''
+        // Daemon — источник правды о записи; не даём offline/close сбросить её.
         if (typeof data.recording === 'boolean') setRecording(data.recording)
         if (data.health) renderHealth({ ...data.health, cursorCli: data.health.cursorCli })
+        if (data.recording) {
+          recordBtn.disabled = false
+          clearBtn.disabled = false
+          copyBtn.disabled = false
+        }
       }
       if (data.event === 'health') {
         renderHealth(data)
       }
       if (data.event === 'auto-applied-partial' || data.event === 'apply-incomplete') {
-        statusEl.textContent = data.message
-          || `Частично: ${data.applied ?? 0} в файлы; не применено: ${data.remaining ?? '?'}. /visbug-apply в Cursor`
+        pipelineEl.classList.add('show')
+        const text = data.summary || data.message || 'Не все правки удалось применить автоматически.'
+        pipelineEl.textContent = text
+        statusEl.textContent = data.failed?.length
+          ? `Частично / ошибки: ${data.applied ?? 0} ок, ${data.failed.length} нет`
+          : (data.message || text.split('\n')[0])
       }
       if (data.event === 'auto-applied') {
-        const files = (data.files ?? []).length ? ` → ${data.files.join(', ')}` : ''
-        statusEl.textContent = data.remaining
-          ? `Применено ${data.applied} в файлы${files}; осталось ${data.remaining}`
-          : `Готово: ${data.applied} правок в файлы${files}`
+        pipelineEl.classList.add('show')
+        const text = data.summary
+          || (data.remaining
+            ? `Применено ${data.applied}; осталось ${data.remaining}`
+            : `Готово: ${data.applied} правок в файлы`)
+        pipelineEl.textContent = text
+        statusEl.textContent = data.writes?.length
+          ? `✅ Записано: ${data.writes.map((w) => w.selector).slice(0, 2).join(', ')}`
+          : text.split('\n')[0]
       }
-      if (data.event === 'auto-agent-started') {
-        statusEl.textContent = data.message || `Агент обрабатывает ${data.total} правок…`
+      if (data.event === 'auto-apply-started') {
+        pipelineEl.classList.add('show')
+        pipelineEl.textContent = 'Применяю безопасные правки в исходники…'
+      }
+      if (data.event === 'agent-fallback-started') {
+        pipelineEl.classList.add('show')
+        pipelineEl.textContent = data.message || `Cursor Agent разбирает ${data.total} сложных правок…`
+        statusEl.textContent = 'Cursor Agent работает в фоне'
+      }
+      if (data.event === 'agent-fallback-finished') {
+        pipelineEl.classList.add('show')
+        const files = (data.files ?? []).length ? ` → ${data.files.join(', ')}` : ''
+        pipelineEl.textContent = data.message + files
+        statusEl.textContent = data.completion
+          ? `Cursor Agent завершил обработку: ${data.applied} правок`
+          : 'Cursor Agent не подтвердил применённые правки'
       }
       if (data.event === 'auto-agent-skipped') {
         statusEl.textContent = `Запись OK; auto-agent: ${data.reason}`
@@ -196,7 +270,7 @@ function connectWs() {
       if (data.event === 'recording-finished') {
         setRecording(false)
         recordBtn.disabled = false
-        count.textContent = `В буфере правок: ${data.total ?? 0}`
+        count.textContent = `Правок текущей записи: ${data.total ?? 0}`
         refreshStats()
       }
       if (data.event === 'recording-error') {
@@ -221,7 +295,7 @@ connectWs()
 function notifyTabRecording(action) {
   return new Promise((resolve) => {
     const type = action === 'start' ? 'visbug-recording-start' : 'visbug-recording-stop'
-    chrome.runtime.sendMessage({ type }, (res) => {
+    chrome.runtime.sendMessage({ type, tabId: activeTabId }, (res) => {
       if (chrome.runtime.lastError) {
         resolve({ ok: false, error: chrome.runtime.lastError.message })
         return
@@ -251,8 +325,14 @@ recordBtn.addEventListener('click', async () => {
 
   recordBtn.disabled = true
   recordBtn.textContent = 'Подготовка…'
-  wsSend({ event: 'popup-recording-start' })
-  count.textContent = 'В буфере правок: 0'
+  await refreshActivePageUrl()
+  if (!lastHealth?.autoApplyReady) {
+    recordBtn.disabled = false
+    statusEl.textContent = 'Для этой страницы не назначена папка проекта.'
+    return
+  }
+  wsSend({ event: 'popup-recording-start', url: activePageUrl })
+  count.textContent = 'Правок текущей записи: 0'
   cachedChangesText = ''
   const tabRes = await notifyTabRecording('start')
   if (!tabRes.ok) {
@@ -264,9 +344,10 @@ recordBtn.addEventListener('click', async () => {
   }
 })
 
+
 clearBtn.addEventListener('click', () => {
   wsSend({ event: 'popup-clear' })
-  count.textContent = 'В буфере правок: 0'
+  count.textContent = 'Правок текущей записи: 0'
   cachedChangesText = ''
   setRecording(false)
 })

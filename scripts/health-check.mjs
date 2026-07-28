@@ -40,13 +40,13 @@ try {
 const daemonOk = await pingDaemon()
 
 const lines = [
-  'VisBug MCP — health check',
+  'VisBug Bridge — health check',
   `version: ${PACKAGE_VERSION}`,
   `config: ${getConfigPath()}`,
   `daemon ws://127.0.0.1:4844: ${daemonOk ? 'OK' : 'НЕТ (npm run setup или start-ws-daemon.ps1)'}`,
-  `mcp.json visbug-mcp: ${mcpOk ? 'OK' : 'НЕТ'}`,
-  `cursor cli (${cli.command}): ${cli.ok ? 'OK' : 'НЕТ'}`,
-  `spawnCli: ${config.autoAgent?.spawnCli === true ? 'ВКЛ' : 'ВЫКЛ (без терминала)'}`,
+  `Cursor Agent fallback (${cli.command}): ${cli.ok ? 'OK' : 'НЕТ'}`,
+  `spawnCli: ${config.autoAgent?.spawnCli === true ? 'ВКЛ' : 'ВЫКЛ (без терминалов, только auto-apply)'}`,
+  `MCP в Cursor (необязательно): ${mcpOk ? 'OK' : 'НЕТ'}`,
   `workspace: ${config.autoAgent?.workspace || '(не задан)'}`,
   `repoRoot: ${config.repoRoot || '(не задан)'}`,
 ]

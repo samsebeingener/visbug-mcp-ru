@@ -2,7 +2,7 @@
  * Fixed "REC" badge while VisBug recording is active.
  */
 
-const RECORDING_BADGE_VERSION = '0.6.1'
+const RECORDING_BADGE_VERSION = '0.6.35'
 
 if (globalThis.VisbugMcpRecordingBadge?.version !== RECORDING_BADGE_VERSION) {
   globalThis.VisbugMcpRecordingBadge?.stop?.()
@@ -13,6 +13,8 @@ if (globalThis.VisbugMcpRecordingBadge?.version !== RECORDING_BADGE_VERSION) {
   const badge = {
     host: null,
     dot: null,
+    timer: null,
+    startedAt: 0,
     pulseRaf: 0,
 
     _ensureHost() {
@@ -20,7 +22,7 @@ if (globalThis.VisbugMcpRecordingBadge?.version !== RECORDING_BADGE_VERSION) {
 
       const host = document.createElement('div')
       host.id = ROOT_ID
-      host.setAttribute('aria-hidden', 'true')
+      host.setAttribute('aria-label', 'Запись VisBug')
       host.style.cssText = [
         'position:fixed',
         'top:12px',
@@ -28,16 +30,17 @@ if (globalThis.VisbugMcpRecordingBadge?.version !== RECORDING_BADGE_VERSION) {
         'z-index:' + Z_INDEX,
         'display:flex',
         'align-items:center',
-        'gap:6px',
-        'padding:4px 10px 4px 8px',
-        'border-radius:999px',
-        'background:rgba(15,23,42,0.82)',
+        'gap:9px',
+        'padding:10px 12px',
+        'border-radius:10px',
+        'background:rgba(69,10,10,0.96)',
+        'border:1px solid #ef4444',
         'color:#fff',
-        'font:600 11px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif',
+        'font:800 13px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif',
         'letter-spacing:0.04em',
         'text-transform:uppercase',
         'box-shadow:0 2px 10px rgba(0,0,0,0.22)',
-        'pointer-events:none',
+        'pointer-events:auto',
         'user-select:none',
         '-webkit-user-select:none',
       ].join(';')
@@ -53,13 +56,26 @@ if (globalThis.VisbugMcpRecordingBadge?.version !== RECORDING_BADGE_VERSION) {
       ].join(';')
 
       const label = document.createElement('span')
-      label.textContent = 'ЗАПИСЬ'
+      label.textContent = 'ЗАПИСЬ ИДЁТ'
 
-      host.append(dot, label)
+      const timer = document.createElement('span')
+      timer.textContent = '00:00'
+      timer.style.cssText = 'color:#fecaca;font:600 12px/1 system-ui'
+
+      const stop = document.createElement('button')
+      stop.type = 'button'
+      stop.textContent = '■ Стоп'
+      stop.style.cssText = 'border:1px solid #fecaca;border-radius:6px;background:#991b1b;color:#fff;padding:6px 8px;font:700 12px/1 system-ui;cursor:pointer'
+      stop.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent('visbug-mcp-recording-control', { detail: { action: 'stop' } }))
+      })
+
+      host.append(dot, label, timer, stop)
       document.documentElement.appendChild(host)
 
       this.host = host
       this.dot = dot
+      this.timer = timer
     },
 
     _startPulse() {
@@ -81,11 +97,17 @@ if (globalThis.VisbugMcpRecordingBadge?.version !== RECORDING_BADGE_VERSION) {
     start() {
       this._ensureHost()
       this.host.style.display = 'flex'
+      this.startedAt = Date.now()
+      this.timerInterval = setInterval(() => {
+        const seconds = Math.floor((Date.now() - this.startedAt) / 1000)
+        this.timer.textContent = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+      }, 1000)
       this._startPulse()
     },
 
     stop() {
       cancelAnimationFrame(this.pulseRaf)
+      clearInterval(this.timerInterval)
       this.pulseRaf = 0
       if (this.host) this.host.style.display = 'none'
     },

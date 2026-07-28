@@ -119,6 +119,55 @@ export const AUTO_APPLY_SAFE_PROPERTIES = new Set([
 export const AUTO_APPLY_BLOCKED_SELECTOR_RE =
   /editorial-card-glow|pointer-events-none|vibe-annotations|visbug-mcp-guides/i
 
+/** Текстовые узлы — не «съедать» их Move как gutter grid-колонки. */
+const TEXT_MOVE_TAGS = new Set([
+  'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'a', 'li', 'label', 'small', 'blockquote',
+])
+
+/** Шум от hover/glow карточек — не ошибка, не пишем в CSS. */
+export function isDecorativeStyleChange(change) {
+  if (change?.type !== 'style') return false
+  const prop = String(change.property ?? '')
+  const sel = String(change.selector ?? '')
+  if (AUTO_APPLY_BLOCKED_SELECTOR_RE.test(sel)) return true
+  if (prop === '--start' || prop === '--glow-mask') return true
+  if (prop.startsWith('--') && /editorial-card|glow/i.test(sel)) return true
+  return false
+}
+
+export function tailwindGapClassToPx(unit) {
+  const num = Number(unit)
+  if (!Number.isFinite(num)) return null
+  return num * 4
+}
+
+/** gap-12 → 48px и т.д. из классов в пути VisBug. */
+export function parseGapPxFromSelector(selector) {
+  const gaps = new Set()
+  const s = String(selector ?? '')
+  for (const m of s.matchAll(/(?:^|[.\s])(?:(?:sm|md|lg|xl|2xl):)?gap-(\d+)/g)) {
+    const px = tailwindGapClassToPx(m[1])
+    if (px != null) gaps.add(px)
+  }
+  return [...gaps]
+}
+
+export function isTextMoveTag(tag = '') {
+  return TEXT_MOVE_TAGS.has(String(tag).toLowerCase())
+}
+
+/** Gutter-drop только для grid-колонок / карточек, не для абзацев. */
+export function isGridColumnLeaf(selector, tag = '') {
+  const { last, tagName } = parseSelectorLeaf(selector, tag)
+  if (isTextMoveTag(tagName)) return false
+  if (/col-span-|\\:col-span-/i.test(last)) return true
+  if (/editorial-card|main-block-card/i.test(selector) && ['article', 'div'].includes(tagName)) {
+    return true
+  }
+  return false
+}
+
 /** Классы, по которым строим короткий селектор для CSS. */
 const MEANINGFUL_APPLY_CLASSES = [
   'builder-rich-text',
@@ -127,7 +176,13 @@ const MEANINGFUL_APPLY_CLASSES = [
   'service-title',
   'service-desc',
   'section-title',
+  'hero-section',
+  'hero-text-inner',
+  'hero-text-col',
   'hero-copy',
+  'hero-shell',
+  'chapter',
+  'dropcap',
   'main-block-card',
   'cards-scroll-rail',
   'pricing-scroll-rail',
@@ -135,33 +190,120 @@ const MEANINGFUL_APPLY_CLASSES = [
   'monochrom-content-section__inner',
 ]
 
+/** Теги, которых в секции обычно много — нельзя сокращать до `.section tag`. */
+const AMBIGUOUS_APPLY_TAGS = new Set(['p', 'span', 'a', 'li', 'button', 'label', 'small'])
+
+const TAILWINDISH_CLASS_RE = /^(sm|md|lg|xl|2xl|hover|focus|group|peer|dark|text|font|leading|tracking|w|h|max|min|p|m|px|py|pt|pb|pl|pr|mx|my|mt|mb|ml|mr|gap|flex|grid|col|row|items|justify|self|place|overflow|relative|absolute|fixed|sticky|hidden|block|inline|rounded|border|bg|shadow|opacity|z|transition|duration|ease|scale|rotate|translate|drop|object|shrink|grow|basis|space|order|content|pointer|select|cursor|sr|antialiased|not|italic|underline|line|decoration|align|whitespace|break|truncate|uppercase|lowercase|capitalize|normal|tabular|ordinal|slashed|indent|list|appearance|outline|ring|mix|filter|backdrop|blur|brightness|contrast|grayscale|hue|invert|saturate|sepia|will|animate|origin|scroll|snap|touch|resize|fill|stroke|sr-only|not-italic)([:-]|$)/i
+
+export function parseSelectorLeaf(selector, tag = '') {
+  // VisBug: `a > b > c`; уже упрощённые: `.hero-section h1`
+  const parts = String(selector).split(/\s*>\s*|\s+/).filter(Boolean)
+  const last = parts[parts.length - 1] ?? ''
+  const nth = last.match(/:nth-of-type\((\d+)\)/)?.[1]
+    ?? last.match(/:nth-child\((\d+)\)/)?.[1]
+  const tagName = (last.match(/^([a-z][\w-]*)/i)?.[1] || tag || '').toLowerCase()
+  return { last, nth, tagName }
+}
+
+function extractLeafSemanticClass(lastSegment) {
+  const withoutPseudo = String(lastSegment).replace(/:(?:nth-of-type|nth-child)\([^)]+\)/g, '')
+  const classes = [...withoutPseudo.matchAll(/\.((?:\\.|[a-zA-Z0-9_-])+)/g)].map((m) => m[1])
+  for (const cls of classes) {
+    const plain = cls.replace(/\\/g, '')
+    // Сетка Tailwind: lg:col-span-5 — структурный якорь карточки
+    if (/^(?:sm|md|lg|xl|2xl):col-span-\d+$/.test(plain) || /^col-span-\d+$/.test(plain)) {
+      return cls
+    }
+    if (cls.includes('\\')) continue
+    if (TAILWINDISH_CLASS_RE.test(cls)) continue
+    return cls
+  }
+  return null
+}
+
+function findMeaningfulClass(selector) {
+  return MEANINGFUL_APPLY_CLASSES.find((cls) => {
+    const re = new RegExp(`(?:^|[.\\s>#])${cls}(?:[.\\s:>\\[]|$)`)
+    return re.test(selector) || selector.includes(`.${cls}`) || selector.includes(`${cls}.`)
+  })
+}
+
+function selectorTargetsSectionRoot(selector, section) {
+  const s = String(selector).trim()
+  return (
+    s === `#${section}`
+    || s === `section#${section}`
+    || new RegExp(`^section#${section}(?:\\.|:|$)`).test(s)
+  )
+}
+
 /**
- * Длинный путь VisBug → короткий селектор для sections.css
- * @example `#services > … > p:nth-of-type(1)` → `#services .builder-rich-text p:nth-of-type(1)`
+ * Длинный путь VisBug → короткий селектор для CSS.
+ * Приоритет: класс на самом элементе (`.chapter` / `.lg\:col-span-5`).
+ * НИКОГДА не схлопывать до голого `#section`, если двигали ребёнка внутри.
  */
 export function simplifySelectorForApply(selector, tag = '') {
   if (!selector || typeof selector !== 'string') return null
   if (AUTO_APPLY_BLOCKED_SELECTOR_RE.test(selector)) return null
 
+  const { last, nth, tagName } = parseSelectorLeaf(selector, tag)
   const section = extractSectionKey(selector)
-  if (!section) return selector.length <= 240 ? selector : null
+  const sectionClass = selector.match(/section\.([a-zA-Z][\w-]*)/)?.[1]
+  const anchorClass = findMeaningfulClass(selector)
+  const leafClass = extractLeafSemanticClass(last)
+  const rootClass = sectionClass || (anchorClass && !['chapter', 'dropcap'].includes(anchorClass) ? anchorClass : null)
 
-  const anchorClass = MEANINGFUL_APPLY_CLASSES.find((cls) => selector.includes(cls))
-  const last = selector.split(' > ').pop() ?? ''
-  const nth = last.match(/:nth-of-type\((\d+)\)/)?.[1]
-    ?? last.match(/:nth-child\((\d+)\)/)?.[1]
-  const tagName = (last.match(/^([a-z][\w-]*)/i)?.[1] || tag || '').toLowerCase()
-
-  let short = `#${section}`
-  if (anchorClass && !anchorClass.includes('__inner')) {
-    short += ` .${anchorClass}`
+  // 1) Уникальный/структурный класс на leaf
+  if (leafClass) {
+    if (section) return `#${section} .${leafClass}`
+    if (rootClass && rootClass !== leafClass) return `.${rootClass} .${leafClass}`
+    return `.${leafClass}`
   }
-  if (tagName && tagName !== 'div') {
-    short += ` ${tagName}`
-  }
-  if (nth) short += `:nth-of-type(${nth})`
 
-  return short.length <= 240 ? short : `#${section} ${tagName || ''}`.trim()
+  if (section) {
+    // Целимся в саму секцию — ок
+    if (selectorTargetsSectionRoot(selector, section)) return `#${section}`
+
+    let short = `#${section}`
+    if (anchorClass && !anchorClass.includes('__inner') && anchorClass !== section) {
+      short += ` .${anchorClass}`
+    }
+
+    if (tagName && tagName !== 'div' && tagName !== 'section') {
+      short += ` ${tagName}`
+      if (nth && AMBIGUOUS_APPLY_TAGS.has(tagName)) short += `:nth-of-type(${nth})`
+      return short.length <= 240 ? short : null
+    }
+
+    // div/section-ребёнок без своего класса — только с nth, иначе отказ (не двигать весь #method)
+    if ((tagName === 'div' || !tagName) && nth) {
+      short += ` div:nth-of-type(${nth})`
+      return short.length <= 240 ? short : null
+    }
+
+    return null
+  }
+
+  // Static HTML / Tailwind: section.hero-section без #id
+  if (rootClass && tagName && tagName !== 'div' && tagName !== 'section') {
+    if (AMBIGUOUS_APPLY_TAGS.has(tagName)) {
+      if (nth) return `.${rootClass} ${tagName}:nth-of-type(${nth})`
+      return null
+    }
+    const short = `.${rootClass} ${tagName}`
+    return short.length <= 240 ? short : null
+  }
+  if (rootClass && selectorTargetsSectionRoot(selector, rootClass)) {
+    return `.${rootClass}`
+  }
+  if (rootClass && (selector.includes('>') || selector.includes(' '))) {
+    return null
+  }
+  if (rootClass) {
+    return `.${rootClass}`
+  }
+
+  return selector.length <= 240 ? selector : null
 }
 
 const VISBUG_SECTION_IDS = new Set([
@@ -228,12 +370,8 @@ export function getApplyHints(change) {
 
   const prop = change.property
 
-  if ((prop === 'left' || prop === 'top') && isGridLayoutContext(selector)) {
-    const alt = prop === 'left' ? 'margin-inline-start' : 'margin-top'
-    hints.push(`💡 подсказка: в исходниках лучше ${alt} вместо inline ${prop}`)
-    if (prop === 'left' && /\.service-cell\b|service-cell/.test(selector)) {
-      hints.push('💡 файл: sections.css')
-    }
+  if (prop === 'left' || prop === 'top') {
+    hints.push('💡 Move VisBug → в исходниках transform: translate(x, y), не margin/left')
   }
 
   return hints
