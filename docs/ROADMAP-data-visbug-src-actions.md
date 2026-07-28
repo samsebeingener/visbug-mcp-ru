@@ -210,6 +210,6 @@ v0.6.36 (tag) → v0.7.0 Actions schema + snapshot
 
 ## Ссылки
 
-- [onlook-dev/onlook](https://github.com/onlook-dev/onlook) — Apache 2.0, `packages/parser`, `data-onlook-id`
+- [onlook-dev/onlook](https://github.com/onlook-dev/onlook) — Apache 2.0; **архитектурный референс** (`data-onlook-id`, AST parser). Код Onlook в репо не копируется; при заимствовании фрагментов — сохранить NOTICE/лицензию Apache 2.0.
 - [Onlook Architecture](https://docs.onlook.com/developers/architecture)
 - Внутри: `src/auto-apply.js`, `extension/snapshot.js`, `extension/alignment-guides.js`

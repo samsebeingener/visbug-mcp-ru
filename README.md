@@ -5,8 +5,7 @@
 <h1 align="center">VisBug MCP Bridge</h1>
 
 <p align="center">
-  <strong>Русская локализация форка</strong> <a href="https://github.com/mambari/visbug-mcp">mambari/visbug-mcp</a><br>
-  Мост <strong>VisBug → Cursor</strong> через MCP: визуальные правки на <code>localhost</code> попадают в агента как структурированный CSS-diff.
+  Мост <strong>VisBug → Cursor</strong> через MCP: визуальные правки на <code>localhost</code> → Actions v2 → auto-apply в исходники (React AST или Tailwind на static HTML).
 </p>
 
 <p align="center">
@@ -171,9 +170,27 @@ Bridge сопоставляет точный origin с папкой проект
 | **Скопировать правки** | Копирует форматированный список в буфер обмена |
 | **Очистить правки** | Сбрасывает store и storage VisBug |
 
-### MCP-инструменты
+### MCP-инструменты (v0.10+)
 
-#### `get_changes`
+| Инструмент | Назначение |
+|---|---|
+| **`get_actions`** | JSON: pending MOVE/STYLE/TEXT, workspace, summary |
+| **`apply_actions`** | Запись в файлы через auto-apply (`actionIds` / indices) |
+| `get_changes` | [legacy] текстовый summary |
+| `apply_changes` | [legacy] только пометка в буфере |
+| `clear_changes` | Очистка store |
+
+#### `get_actions` / `apply_actions`
+
+Предпочтительный путь после «Стоп», если в буфере остались правки или нужен ручной apply из Cursor:
+
+```
+get_actions → apply_actions
+```
+
+`apply_actions` без `markOnly` вызывает тот же `auto-apply.js`, что и демон после записи.
+
+#### `get_changes` (legacy)
 
 Возвращает захваченные визуальные правки (ещё не применённые).
 
@@ -326,7 +343,9 @@ visbug-mcp-ru/
 
 ## Лицензия и upstream
 
-Основано на [mambari/visbug-mcp](https://github.com/mambari/visbug-mcp). VisBug — [GoogleChromeLabs/ProjectVisBug](https://github.com/GoogleChromeLabs/ProjectVisBug).
+Самостоятельная разработка на базе идей [mambari/visbug-mcp](https://github.com/mambari/visbug-mcp) (ранний upstream). VisBug — [GoogleChromeLabs/ProjectVisBug](https://github.com/GoogleChromeLabs/ProjectVisBug).
+
+Архитектурные референсы (идеи, не копипаст кода): [Onlook](https://github.com/onlook-dev/onlook) (`data-visbug-src`, Actions, AST apply) — см. [ROADMAP](docs/ROADMAP-data-visbug-src-actions.md).
 
 ---
 
