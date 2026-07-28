@@ -25,6 +25,7 @@ import {
   resolveApplySelectorWithVisbug,
   pickCssTargetForVisbug,
 } from './visbug-src.js'
+import { tryApplyStaticHtmlDimension, tryApplyStaticHtmlTransform } from './static-html-apply.js'
 import {
   canTryAstDimensionApply,
   canTryAstMoveApply,
@@ -107,6 +108,7 @@ function mapProperty(change) {
   if (isVisbugArtifactProperty(prop)) return null
   // left/top обрабатываются отдельно → transform: translate(...)
   if (prop === 'left' || prop === 'top') return null
+  if (prop === 'transform') return 'transform'
   if (AUTO_APPLY_SAFE_PROPERTIES.has(prop)) return prop
   return null
 }
@@ -924,6 +926,30 @@ export function autoApplyWorkspace(workspace, changes) {
         log(`ast blocked innerHTML host → CSS fallback for ${prop}`)
       } else {
         log(`ast skip ${ast.reason} → CSS fallback`)
+      }
+    }
+
+    if (!wrote && layout === 'static-html' && (prop === 'width' || prop === 'height')) {
+      const staticDim = tryApplyStaticHtmlDimension(target.path, applySelector, prop, value)
+      if (staticDim.ok) {
+        wrote = true
+        writeFile = staticDim.file
+        astLogged = true
+        log(`style OK ${prop}=${value} (static-html className) → ${staticDim.file}`)
+      } else {
+        log(`static-html skip ${staticDim.reason} → CSS fallback for ${prop}`)
+      }
+    }
+
+    if (!wrote && layout === 'static-html' && prop === 'transform') {
+      const staticTransform = tryApplyStaticHtmlTransform(target.path, applySelector, value)
+      if (staticTransform.ok) {
+        wrote = true
+        writeFile = staticTransform.file
+        astLogged = true
+        log(`style OK transform=${staticTransform.value} (static-html className) → ${staticTransform.file}`)
+      } else {
+        log(`static-html skip ${staticTransform.reason} → CSS fallback for transform`)
       }
     }
 

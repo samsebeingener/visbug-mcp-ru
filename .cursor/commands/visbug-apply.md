@@ -16,12 +16,14 @@ description: VisBug MCP — применить оставшиеся правки
 
 ## Шаги
 
-1. Вызови MCP **visbug-mcp** → `get_changes` (без фильтра).
-2. Примени правки в workspace из `~/.visbug-mcp/config.json` → `autoAgent.workspace`.
-3. **Не применяй** артефакты VisBug: `cursor`, `position`, `transition`, `--start`, `--glow-mask`, `editorial-card-glow`.
-4. `left`/`top` в grid → `margin-inline-start` / `margin-top` в `sections.css`.
-5. Текст из CMS — скажи пользователю, что править в Directus, не в `.tsx`.
-6. После записи в файлы — `apply_changes` с индексами применённых `[N]`.
+1. Вызови MCP **visbug-mcp** → **`get_actions`** (JSON: `actions`, `workspace`, `summary`).
+2. Примени остаток машиной: **`apply_actions`** (без `markOnly`) — пишет в файлы через auto-apply.
+3. Если правил вручную в редакторе — **`apply_actions`** с `markOnly: true` или `actionIds` только для пометки.
+4. **Не применяй** артефакты VisBug: `cursor`, `position`, `transition`, `--start`, `--glow-mask` (они в `artifacts`, не в `actions`).
+5. `left`/`top` → MOVE; static HTML width/transform → Tailwind-классы в `index.html`; React → `data-visbug-src` + AST.
+6. Текст из CMS — скажи пользователю, что править в Directus, не в `.tsx`.
+
+Legacy: `get_changes` / `apply_changes` (только пометка в буфере) — устаревают в v1.0.
 
 Промпт-подсказки: `projects/visbug-mcp-ru/prompts/visbug-apply.md`.
 

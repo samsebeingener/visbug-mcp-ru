@@ -21,6 +21,9 @@ import {
   normalizeStore,
 } from './actions/store.js'
 import { formatActionsForMcp } from './actions/format.js'
+import { buildActionsPayload } from './actions/export.js'
+import { applyStoreActions } from './actions/apply-pipeline.js'
+import { loadConfig } from './config.js'
 import { homedir } from 'os'
 import { join } from 'path'
 import { PACKAGE_VERSION } from './version.js'
@@ -40,6 +43,14 @@ function writeStore(store) {
   saveStore(STORE_FILE, store)
 }
 
+function resolveWorkspace(store, override) {
+  const fromArg = String(override ?? '').trim()
+  if (fromArg) return fromArg
+  const fromStore = String(store.workspace ?? '').trim()
+  if (fromStore) return fromStore
+  return String(loadConfig().autoAgent?.workspace ?? '').trim()
+}
+
 function formatStoreText(store, filter) {
   const actionText = formatActionsForMcp(store)
   if (actionText) {
@@ -52,6 +63,10 @@ function formatStoreText(store, filter) {
   return formatChangesFromStore(legacy, { type: filter })
 }
 
+function jsonToolResult(payload) {
+  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
+}
+
 // ─── MCP ──────────────────────────────────────────────────────────────────────
 
 const mcpServer = new Server(
@@ -62,10 +77,53 @@ const mcpServer = new Server(
 mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
+      name: 'get_actions',
+      description:
+        'Actions v2 (канон v1.0): JSON с pending MOVE/STYLE/TEXT/ATTRIBUTE, workspace, summary. '
+        + 'Предпочитай этот инструмент вместо get_changes.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          includeApplied: {
+            type: 'boolean',
+            description: 'Включить уже применённые actions (по умолчанию false).',
+          },
+        },
+      },
+    },
+    {
+      name: 'apply_actions',
+      description:
+        'Применить pending actions в файлы workspace (auto-apply). '
+        + 'По actionIds, indices или все pending. markOnly=true — только пометить в буфере.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          actionIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'UUID actions из get_actions. Пусто = все pending.',
+          },
+          indices: {
+            type: 'array',
+            items: { type: 'number' },
+            description: 'Индексы pending actions [0] из summary get_actions.',
+          },
+          workspace: {
+            type: 'string',
+            description: 'Абсолютный путь проекта. По умолчанию store.workspace или config autoAgent.workspace.',
+          },
+          markOnly: {
+            type: 'boolean',
+            description: 'Только пометить applied в буфере, файлы не трогать.',
+          },
+        },
+      },
+    },
+    {
       name: 'get_changes',
       description:
-        'Возвращает визуальные правки VisBug (Actions v2: MOVE/STYLE/TEXT). '
-        + 'Для каждой записи: селектор, data-visbug-src если есть, дельта/стили, URL.',
+        '[legacy] Текстовый summary. Используй get_actions для структурированного JSON.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -79,15 +137,15 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'apply_changes',
       description:
-        'Помечает actions как применённые в буфере (~/.visbug-mcp/changes.json). '
-        + 'Файлы проекта не меняет — их пишет auto-apply после «Стоп» или вы через /visbug-apply.',
+        '[legacy] Помечает actions applied в буфере без записи в файлы. '
+        + 'Для записи в файлы — apply_actions.',
       inputSchema: {
         type: 'object',
         properties: {
           ids: {
             type: 'array',
             items: { type: 'number' },
-            description: 'Индексы actions для пометки. Пусто = все pending.',
+            description: 'Индексы в store.actions (не pending). Пусто = все pending.',
           },
         },
       },
@@ -102,6 +160,38 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 mcpServer.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params
+
+  if (name === 'get_actions') {
+    const store = readStore()
+    const payload = buildActionsPayload(store, {
+      includeApplied: Boolean(args?.includeApplied),
+    })
+    return jsonToolResult(payload)
+  }
+
+  if (name === 'apply_actions') {
+    const store = readStore()
+    const workspace = resolveWorkspace(store, args?.workspace)
+    const result = applyStoreActions(store, workspace, {
+      actionIds: args?.actionIds,
+      indices: args?.indices,
+      markOnly: Boolean(args?.markOnly),
+    })
+    writeStore(result.store)
+    return jsonToolResult({
+      ok: result.ok,
+      workspace,
+      applied: result.applied,
+      marked: result.marked ?? 0,
+      skipped: result.skipped ?? 0,
+      artifacts: result.artifacts ?? 0,
+      files: result.files ?? [],
+      writes: result.writes ?? [],
+      failed: result.failed ?? [],
+      summary: result.summary,
+      pendingCount: result.store.actions.filter((a) => !a.applied).length,
+    })
+  }
 
   if (name === 'get_changes') {
     const store = readStore()

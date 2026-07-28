@@ -168,7 +168,9 @@
 
 ## Фаза 4 — Agent + MCP (параллельно с 2–3)
 
-- MCP tool `get_actions` / `apply_actions`
+- [x] MCP tool `get_actions` — JSON payload (v0.10.0)
+- [x] MCP tool `apply_actions` — auto-apply в workspace по actionIds/indices (v0.10.0)
+- [ ] `get_changes` / `apply_changes` — удалить в v1.0.0
 - Prompt `visbug-apply.md`: Actions-first, legacy fallback
 - Checkpoint: git stash / branch перед batch apply (опционально)
 
@@ -191,7 +193,8 @@
 v0.6.36 (tag) → v0.7.0 Actions schema + snapshot
              → v0.7.1 align.reference в guides
              → v0.8.0 data-visbug-src spike (frontend-new)
-             → v0.9.0 ast-apply className
+             → v0.9.0 ast-apply className (React)
+             → v0.10.0 static-html Tailwind apply + MCP get_actions/apply_actions
              → v1.0.0 Actions-only buffer, legacy deprecated
 ```
 

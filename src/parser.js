@@ -273,10 +273,20 @@ export function simplifySelectorForApply(selector, tag = '') {
   const sectionClass = selector.match(/section\.([a-zA-Z][\w-]*)/)?.[1]
   const anchorClass = findMeaningfulClass(selector)
   const leafClass = extractLeafSemanticClass(last)
+  const leafId = last.match(/#([a-zA-Z][\w-]*)/)?.[1]
   const rootClass = sectionClass || (anchorClass && !['chapter', 'dropcap'].includes(anchorClass) ? anchorClass : null)
+
+  if (leafId && !VISBUG_SECTION_IDS.has(leafId)) {
+    return `#${leafId}`
+  }
 
   // 1) Уникальный/структурный класс на leaf
   if (leafClass) {
+    const inHeader = /\bheader(?:[.\s>#:]|$)/i.test(selector)
+    if (inHeader && tagName === 'a') {
+      if (section) return `#${section} header a.${leafClass}`
+      return `header a.${leafClass}`
+    }
     if (section) return `#${section} .${leafClass}`
     if (rootClass && rootClass !== leafClass) return `.${rootClass} .${leafClass}`
     return `.${leafClass}`

@@ -310,3 +310,66 @@ test('keeps framework-src behavior for CSS and TSX text', () => {
     rmSync(workspace, { recursive: true, force: true })
   }
 })
+
+test('static-html resize patches Tailwind w/h on header button, not other .js-booking-btn', () => {
+  const longSelector = [
+    'header.fixed.top-0',
+    '> div.max-w-6xl',
+    '> div.flex.items-center.gap-4',
+    '> a.js-booking-btn.btn-surface',
+  ].join(' ')
+
+  const workspace = makeWorkspace({
+    'index.html': `<!doctype html>
+<html><head><style>/* VisBug layout — auto-apply */</style></head>
+<body>
+<header class="fixed"><div><div class="flex">
+  <a id="header-booking-btn" href="#" class="js-booking-btn hidden sm:inline-flex h-11 px-5">Header</a>
+</div></div></header>
+<main><a href="#" class="js-booking-btn h-12">Hero CTA</a></main>
+</body></html>`,
+  })
+  try {
+    const changes = [
+      { type: 'style', selector: longSelector, property: 'width', newValue: '124px', tag: 'a', applied: false },
+      { type: 'style', selector: longSelector, property: 'height', newValue: '43px', tag: 'a', applied: false },
+    ]
+    const result = autoApplyWorkspace(workspace, changes)
+    const html = readFileSync(join(workspace, 'index.html'), 'utf8')
+
+    assert.equal(result.applied, 2)
+    assert.match(html, /id="header-booking-btn"[^>]*w-\[124px\]/)
+    assert.match(html, /id="header-booking-btn"[^>]*h-\[43px\]/)
+    assert.doesNotMatch(html, /<main>[\s\S]*w-\[124px\]/)
+    assert.doesNotMatch(html, /\.js-booking-btn\s*\{[^}]*width:\s*124px/)
+  } finally {
+    rmSync(workspace, { recursive: true, force: true })
+  }
+})
+
+test('static-html applies transform translate as translate-x/y classes on #id', () => {
+  const workspace = makeWorkspace({
+    'index.html': `<!doctype html>
+<html><body><header>
+  <a id="header-booking-btn" class="h-11 px-5">Book</a>
+</header></body></html>`,
+  })
+  try {
+    const changes = [
+      {
+        type: 'style',
+        selector: '#header-booking-btn',
+        property: 'transform',
+        newValue: 'translate(-32px, 0px)',
+        tag: 'a',
+        applied: false,
+      },
+    ]
+    const result = autoApplyWorkspace(workspace, changes)
+    const html = readFileSync(join(workspace, 'index.html'), 'utf8')
+    assert.equal(result.applied, 1)
+    assert.match(html, /-translate-x-\[32px\]/)
+  } finally {
+    rmSync(workspace, { recursive: true, force: true })
+  }
+})

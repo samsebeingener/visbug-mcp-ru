@@ -2,7 +2,7 @@
  * Snapshot до/после — diff DOM-состояния для режима «Запись».
  */
 
-const SNAPSHOT_MODULE_VERSION = '0.5.3'
+const SNAPSHOT_MODULE_VERSION = '0.5.4'
 
 if (globalThis.VisbugMcpSnapshot?.version !== SNAPSHOT_MODULE_VERSION) {
 
@@ -229,11 +229,18 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
 }
 
 function getDefaultSnapshotRoot(documentRef = globalThis.document) {
-  return (
-    documentRef.querySelector('#homepage-root')
-    || documentRef.querySelector('main')
-    || documentRef.body
-  )
+  const doc = documentRef ?? globalThis.document
+  const homepage = doc.querySelector('#homepage-root')
+  if (homepage) return homepage
+
+  const main = doc.querySelector('main')
+  const header = doc.querySelector('header')
+  // Статические лендинги: header/nav снаружи <main> — иначе resize шапки не попадает в diff.
+  if (main && header && !main.contains(header)) {
+    return doc.body
+  }
+
+  return main || doc.body
 }
 
 globalThis.VisbugMcpSnapshot = {
