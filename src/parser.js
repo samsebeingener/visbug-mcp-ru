@@ -1,6 +1,21 @@
 /**
- * parser.js — парсинг мутаций VisBug и форматирование правок для MCP / буфера.
+ * parser.js — дедуп мутаций VisBug и текст буфера для Cursor (модель mambari).
  */
+
+import {
+  formatLayoutDeltaBufferLine,
+  isSuspiciousDelta,
+} from '../shared/layout-lever.js'
+import { enrichChangeSelectors } from './selector-short.js'
+import { resolveTargetFile } from './target-resolver.js'
+import {
+  compileChangesToActions,
+  formatActionsJsonBlock,
+  formatWriteRecipesBuffer,
+  compileWriteRecipes,
+} from './actions/compile.js'
+import { isDragArtifactProp } from './actions/write-recipe.js'
+import { STORE_VERSION } from './actions/schema.js'
 
 let seen = new Map()
 
@@ -15,15 +30,84 @@ export function restoreSeen(changes) {
   }
 }
 
+const NOISE_SELECTORS = [
+  /^#vibe-annotations-root/,
+  /#visbug-mcp-guides-root/,
+  /#visbug-mcp-apply-toast/,
+  /#visbug-mcp-recording-badge/,
+  /#scroll-progress\b/,
+  /\[data-visbug-mcp\]/,
+  /vue-devtools/,
+  /^body\s*>\s*visbug/i,
+  /^body\s*>\s*vis-bug/i,
+  /^#↑/,
+]
+
+const NOISE_CSS_PROPS = [
+  /^--[a-f0-9]{8}-/i,
+]
+
+const NOISE_CLASSES = [
+  /router-link-(active|exact-active)/,
+  /loading-fade-(enter|leave)-(active|from|to)/,
+]
+
+const TARGET_META_KEYS = [
+  'visbugSrc',
+  'stableId',
+  'sourceRef',
+  'userTarget',
+  'align',
+  'stampId',
+]
+
+/** Фильтр шума (mambari/visbug-mcp + overlay расширения). */
+export function isMutationNoise(m) {
+  const selector = m.selector ?? ''
+  const parentSelector = m.parentSelector ?? ''
+  if (NOISE_SELECTORS.some((r) => r.test(selector) || r.test(parentSelector))) return true
+  if (m.type === 'layout-delta' && isSuspiciousLayoutDelta(m)) return true
+  if (m.type === 'style' && NOISE_CSS_PROPS.some((r) => r.test(m.property ?? ''))) return true
+  if (m.type === 'style' && isDragArtifactProp(m.property ?? '')) return true
+  if (m.type === 'style' && (m.newValue === 'undefined' || m.newValue === 'null')) return true
+  if (m.type === 'text' && m.oldValue === null) {
+    if (!m.newValue || m.newValue.trim().length > 150) return true
+  }
+  if (m.type === 'attribute' && m.attribute === 'contenteditable') return true
+  if (m.type === 'attribute' && m.attribute === 'class') {
+    const oldClasses = (m.oldValue ?? '').split(/\s+/).filter(Boolean)
+    const newClasses = (m.newValue ?? '').split(/\s+/).filter(Boolean)
+    const addedClasses = newClasses.filter((c) => !oldClasses.includes(c))
+    const removedClasses = oldClasses.filter((c) => !newClasses.includes(c))
+    const delta = [...addedClasses, ...removedClasses]
+    if (delta.length === 0) return true
+    if (delta.every((cls) => NOISE_CLASSES.some((r) => r.test(cls)))) return true
+  }
+  if (m.type === 'node-added' || m.type === 'node-removed') return true
+  return false
+}
+
+/** @deprecated используйте isMutationNoise */
+export function isRecorderNoiseChange(m) {
+  return isMutationNoise(m)
+}
+
 export function parseMutationsToChanges(mutations) {
   const result = []
 
   for (const m of mutations) {
+    if (isMutationNoise(m)) continue
+
     const key = buildKey(m)
 
     if (seen.has(key)) {
       const existing = seen.get(key)
-      existing.newValue = m.newValue ?? m.html ?? m.text
+      if (m.type === 'layout-delta') {
+        const next = normalize(m)
+        Object.assign(existing, next)
+      } else {
+        existing.newValue = m.newValue ?? m.html ?? m.text
+      }
       existing.timestamp = m.timestamp
       continue
     }
@@ -39,6 +123,7 @@ export function parseMutationsToChanges(mutations) {
 function buildKey(m) {
   switch (m.type) {
     case 'style':        return `${m.selector}|style|${m.property}`
+    case 'layout-delta': return `${m.selector}|layout-delta`
     case 'attribute':    return `${m.selector}|attr|${m.attribute}`
     case 'text':         return `${m.selector}|text`
     case 'node-added':   return `${m.selector}|added`
@@ -47,15 +132,25 @@ function buildKey(m) {
   }
 }
 
+function attachTargetMeta(base, m) {
+  for (const key of TARGET_META_KEYS) {
+    if (m[key] !== undefined) base[key] = m[key]
+  }
+  if (m.lever) base.lever = m.lever
+  if (m.parentLayout) base.parentLayout = m.parentLayout
+  return base
+}
+
 function normalize(m) {
-  const base = {
+  const base = attachTargetMeta({
     type: m.type,
     selector: m.selector,
+    diagnosticSelector: m.selector,
     tag: m.tag,
     url: m.url,
     timestamp: m.timestamp,
     applied: false,
-  }
+  }, m)
 
   switch (m.type) {
     case 'style':
@@ -66,8 +161,22 @@ function normalize(m) {
       return { ...base, oldValue: m.oldValue, newValue: m.newValue }
     case 'node-added':
       return { ...base, parentSelector: m.parentSelector, html: m.html }
+    case 'layout-delta':
+      return {
+        ...base,
+        deltaX: m.deltaX,
+        deltaY: m.deltaY,
+        rectBefore: m.rectBefore,
+        rectAfter: m.rectAfter,
+        offsetBefore: m.offsetBefore,
+        offsetAfter: m.offsetAfter,
+        lever: m.lever,
+        parentLayout: m.parentLayout,
+        layoutContext: m.layoutContext,
+        viewport: m.viewport,
+      }
     case 'node-removed':
-      return { ...base, parentSelector: m.parentSelector }
+      return { ...base, parentSelector: m.parentSelector, tag: m.tag }
     default:
       return { ...base, raw: m }
   }
@@ -78,433 +187,113 @@ function formatOldValue(value) {
   return String(value)
 }
 
-/** Свойства, которые VisBug пишет inline, но в исходный CSS не переносятся. */
-export const VISBUG_ARTIFACT_PROPERTIES = new Set([
-  'cursor',
-  'position',
-  'transition',
-  'transition-property',
-])
-
-/** Не переносить в CSS через auto-apply (эффекты карточек, glow, inline-переменные). */
-export const AUTO_APPLY_BLOCKED_PROPERTIES = new Set([
-  ...VISBUG_ARTIFACT_PROPERTIES,
-])
-
-/** Только эти свойства auto-apply пишет сам; остальное — только через LLM. */
-export const AUTO_APPLY_SAFE_PROPERTIES = new Set([
-  'margin-inline-start',
-  'margin-top',
-  'margin-left',
-  'margin-right',
-  'margin-bottom',
-  'font-size',
-  'color',
-  'padding',
-  'padding-top',
-  'padding-bottom',
-  'padding-left',
-  'padding-right',
-  'gap',
-  'row-gap',
-  'column-gap',
-  'width',
-  'max-width',
-  'min-width',
-  'height',
-  'line-height',
-  'letter-spacing',
-])
-
-export const AUTO_APPLY_BLOCKED_SELECTOR_RE =
-  /editorial-card-glow|pointer-events-none|vibe-annotations|visbug-mcp-guides/i
-
-/** Текстовые узлы — не «съедать» их Move как gutter grid-колонки. */
-const TEXT_MOVE_TAGS = new Set([
-  'p', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-  'a', 'li', 'label', 'small', 'blockquote',
-])
-
-/** Шум от hover/glow карточек — не ошибка, не пишем в CSS. */
-export function isDecorativeStyleChange(change) {
-  if (change?.type !== 'style') return false
-  const prop = String(change.property ?? '')
-  const sel = String(change.selector ?? '')
-  if (AUTO_APPLY_BLOCKED_SELECTOR_RE.test(sel)) return true
-  if (prop === '--start' || prop === '--glow-mask') return true
-  if (prop.startsWith('--') && /editorial-card|glow/i.test(sel)) return true
-  return false
+export function isSuspiciousLayoutDelta(m) {
+  if (m?.type !== 'layout-delta') return false
+  return isSuspiciousDelta(m.deltaX ?? 0, m.deltaY ?? 0, m.viewport)
 }
 
-export function tailwindGapClassToPx(unit) {
-  const num = Number(unit)
-  if (!Number.isFinite(num)) return null
-  return num * 4
-}
-
-/** gap-12 → 48px и т.д. из классов в пути VisBug. */
-export function parseGapPxFromSelector(selector) {
-  const gaps = new Set()
-  const s = String(selector ?? '')
-  for (const m of s.matchAll(/(?:^|[.\s])(?:(?:sm|md|lg|xl|2xl):)?gap-(\d+)/g)) {
-    const px = tailwindGapClassToPx(m[1])
-    if (px != null) gaps.add(px)
+function formatSelectorLines(c) {
+  const enriched = enrichChangeSelectors(c)
+  const lines = [`селектор (короткий): ${enriched.shortSelector}`]
+  if (enriched.diagnosticSelector && enriched.diagnosticSelector !== enriched.shortSelector) {
+    lines.push(`селектор (диагностика): ${enriched.diagnosticSelector}`)
   }
-  return [...gaps]
-}
-
-export function isTextMoveTag(tag = '') {
-  return TEXT_MOVE_TAGS.has(String(tag).toLowerCase())
-}
-
-/** Gutter-drop только для grid-колонок / карточек, не для абзацев. */
-export function isGridColumnLeaf(selector, tag = '') {
-  const { last, tagName } = parseSelectorLeaf(selector, tag)
-  if (isTextMoveTag(tagName)) return false
-  if (/col-span-|\\:col-span-/i.test(last)) return true
-  if (/editorial-card|main-block-card/i.test(selector) && ['article', 'div'].includes(tagName)) {
-    return true
-  }
-  return false
-}
-
-/** Классы, по которым строим короткий селектор для CSS. */
-const MEANINGFUL_APPLY_CLASSES = [
-  'builder-rich-text',
-  'prose',
-  'wysiwyg',
-  'entry-content',
-  'content-body',
-  'article-body',
-  'service-cell',
-  'services-matrix',
-  'service-title',
-  'service-desc',
-  'section-title',
-  'hero-section',
-  'hero-text-inner',
-  'hero-text-col',
-  'hero-copy',
-  'hero-shell',
-  'chapter',
-  'dropcap',
-  'main-block-card',
-  'cards-scroll-rail',
-  'pricing-scroll-rail',
-  'faq-inner',
-  'monochrom-content-section__inner',
-]
-
-/** Теги, которых в секции обычно много — нельзя сокращать до `.section tag`. */
-const AMBIGUOUS_APPLY_TAGS = new Set(['p', 'span', 'a', 'li', 'button', 'label', 'small'])
-
-const TAILWINDISH_CLASS_RE = /^(sm|md|lg|xl|2xl|hover|focus|group|peer|dark|text|font|leading|tracking|w|h|max|min|p|m|px|py|pt|pb|pl|pr|mx|my|mt|mb|ml|mr|gap|flex|grid|col|row|items|justify|self|place|overflow|relative|absolute|fixed|sticky|hidden|block|inline|rounded|border|bg|shadow|opacity|z|transition|duration|ease|scale|rotate|translate|drop|object|shrink|grow|basis|space|order|content|pointer|select|cursor|sr|antialiased|not|italic|underline|line|decoration|align|whitespace|break|truncate|uppercase|lowercase|capitalize|normal|tabular|ordinal|slashed|indent|list|appearance|outline|ring|mix|filter|backdrop|blur|brightness|contrast|grayscale|hue|invert|saturate|sepia|will|animate|origin|scroll|snap|touch|resize|fill|stroke|sr-only|not-italic)([:-]|$)/i
-
-export function parseSelectorLeaf(selector, tag = '') {
-  // VisBug: `a > b > c`; уже упрощённые: `.hero-section h1`
-  const parts = String(selector).split(/\s*>\s*|\s+/).filter(Boolean)
-  const last = parts[parts.length - 1] ?? ''
-  const nth = last.match(/:nth-of-type\((\d+)\)/)?.[1]
-    ?? last.match(/:nth-child\((\d+)\)/)?.[1]
-  const tagName = (last.match(/^([a-z][\w-]*)/i)?.[1] || tag || '').toLowerCase()
-  return { last, nth, tagName }
-}
-
-function extractLeafSemanticClass(lastSegment) {
-  const withoutPseudo = String(lastSegment).replace(/:(?:nth-of-type|nth-child)\([^)]+\)/g, '')
-  const classes = [...withoutPseudo.matchAll(/\.((?:\\.|[a-zA-Z0-9_-])+)/g)].map((m) => m[1])
-  for (const cls of classes) {
-    const plain = cls.replace(/\\/g, '')
-    // Сетка Tailwind: lg:col-span-5 — структурный якорь карточки
-    if (/^(?:sm|md|lg|xl|2xl):col-span-\d+$/.test(plain) || /^col-span-\d+$/.test(plain)) {
-      return cls
-    }
-    if (cls.includes('\\')) continue
-    if (TAILWINDISH_CLASS_RE.test(cls)) continue
-    return cls
-  }
-  return null
-}
-
-function findMeaningfulClass(selector) {
-  return MEANINGFUL_APPLY_CLASSES.find((cls) => {
-    const re = new RegExp(`(?:^|[.\\s>#])${cls}(?:[.\\s:>\\[]|$)`)
-    return re.test(selector) || selector.includes(`.${cls}`) || selector.includes(`${cls}.`)
-  })
-}
-
-/**
- * @param {string} selector
- * @param {{ richTextOnly?: boolean }} [options]
- */
-export function findMeaningfulClassInSelector(selector, options = {}) {
-  const { richTextOnly = false } = options
-  for (const cls of MEANINGFUL_APPLY_CLASSES) {
-    const re = new RegExp(`(?:^|[.\\s>#])${cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[.\\s:>\\[]|$)`)
-    if (!re.test(selector) && !selector.includes(`.${cls}`)) continue
-    if (richTextOnly && !/rich.?text|prose|wysiwyg|entry-content|content-body|article-body|cms-content|formatted-body/i.test(cls)) {
-      continue
-    }
-    return cls
-  }
-  return null
-}
-
-function selectorTargetsSectionRoot(selector, section) {
-  const s = String(selector).trim()
-  return (
-    s === `#${section}`
-    || s === `section#${section}`
-    || new RegExp(`^section#${section}(?:\\.|:|$)`).test(s)
-  )
-}
-
-/**
- * Длинный путь VisBug → короткий селектор для CSS.
- * Приоритет: класс на самом элементе (`.chapter` / `.lg\:col-span-5`).
- * НИКОГДА не схлопывать до голого `#section`, если двигали ребёнка внутри.
- */
-export function simplifySelectorForApply(selector, tag = '') {
-  if (!selector || typeof selector !== 'string') return null
-  if (AUTO_APPLY_BLOCKED_SELECTOR_RE.test(selector)) return null
-
-  const { last, nth, tagName } = parseSelectorLeaf(selector, tag)
-  const section = extractSectionKey(selector)
-  const sectionClass = selector.match(/section\.([a-zA-Z][\w-]*)/)?.[1]
-  const anchorClass = findMeaningfulClass(selector)
-  const leafClass = extractLeafSemanticClass(last)
-  const leafId = last.match(/#([a-zA-Z][\w-]*)/)?.[1]
-  const rootClass = sectionClass || (anchorClass && !['chapter', 'dropcap'].includes(anchorClass) ? anchorClass : null)
-
-  if (leafId && !VISBUG_SECTION_IDS.has(leafId)) {
-    return `#${leafId}`
-  }
-
-  // 1) Уникальный/структурный класс на leaf
-  if (leafClass) {
-    const inHeader = /\bheader(?:[.\s>#:]|$)/i.test(selector)
-    if (inHeader && tagName === 'a') {
-      if (section) return `#${section} header a.${leafClass}`
-      return `header a.${leafClass}`
-    }
-    if (section) return `#${section} .${leafClass}`
-    if (rootClass && rootClass !== leafClass) return `.${rootClass} .${leafClass}`
-    return `.${leafClass}`
-  }
-
-  if (section) {
-    // Целимся в саму секцию — ок
-    if (selectorTargetsSectionRoot(selector, section)) return `#${section}`
-
-    let short = `#${section}`
-    if (anchorClass && !anchorClass.includes('__inner') && anchorClass !== section) {
-      short += ` .${anchorClass}`
-    }
-
-    if (tagName && tagName !== 'div' && tagName !== 'section') {
-      short += ` ${tagName}`
-      if (nth && AMBIGUOUS_APPLY_TAGS.has(tagName)) short += `:nth-of-type(${nth})`
-      return short.length <= 240 ? short : null
-    }
-
-    // div/section-ребёнок без своего класса — только с nth, иначе отказ (не двигать весь #method)
-    if ((tagName === 'div' || !tagName) && nth) {
-      short += ` div:nth-of-type(${nth})`
-      return short.length <= 240 ? short : null
-    }
-
-    return null
-  }
-
-  // Static HTML / Tailwind: section.hero-section без #id
-  if (rootClass && tagName && tagName !== 'div' && tagName !== 'section') {
-    if (AMBIGUOUS_APPLY_TAGS.has(tagName)) {
-      if (nth) return `.${rootClass} ${tagName}:nth-of-type(${nth})`
-      return null
-    }
-    const short = `.${rootClass} ${tagName}`
-    return short.length <= 240 ? short : null
-  }
-  if (rootClass && selectorTargetsSectionRoot(selector, rootClass)) {
-    return `.${rootClass}`
-  }
-  if (rootClass && (selector.includes('>') || selector.includes(' '))) {
-    return null
-  }
-  if (rootClass) {
-    return `.${rootClass}`
-  }
-
-  return selector.length <= 240 ? selector : null
-}
-
-const VISBUG_SECTION_IDS = new Set([
-  'vibe-annotations-root',
-  'visbug-mcp-guides-root',
-])
-
-const GRID_LAYOUT_SELECTOR_RE = /service-cell|services-matrix|grid|monochrom-content-section/i
-
-/**
- * Первый #id секции в пути селектора (section#id или #podhod / #avtor / …).
- * @param {string} selector
- * @returns {string | null}
- */
-export function extractSectionKey(selector) {
-  if (!selector || typeof selector !== 'string') return null
-
-  const sectionTag = selector.match(/section#([a-zA-Z][\w-]*)/)
-  if (sectionTag && !VISBUG_SECTION_IDS.has(sectionTag[1])) {
-    return sectionTag[1]
-  }
-
-  for (const match of selector.matchAll(/#([a-zA-Z][\w-]*)/g)) {
-    const id = match[1]
-    if (!VISBUG_SECTION_IDS.has(id)) return id
-  }
-
-  return null
-}
-
-/** @param {string} selector */
-export function isGridLayoutContext(selector) {
-  return Boolean(selector && GRID_LAYOUT_SELECTOR_RE.test(selector))
-}
-
-/** @param {string} property */
-export function isVisbugArtifactProperty(property) {
-  return VISBUG_ARTIFACT_PROPERTIES.has(property)
-}
-
-/**
- * Подсказки для переноса правки в исходники.
- * @param {{ type: string, selector?: string, property?: string }} change
- * @returns {string[]}
- */
-export function getApplyHints(change) {
-  const hints = []
-  const selector = change.selector ?? ''
-
-  if (change.type === 'text') {
-    hints.push('💡 текст: править в компоненте/разметке (.tsx, .astro), не в CSS')
-    if (/service-cell|service-title|service-desc|hero-copy|monochrom/i.test(selector)) {
-      hints.push('💡 искать в frontend-new/src/components или page-content')
-    }
-    return hints
-  }
-
-  if (change.type !== 'style' || !change.property) return hints
-
-  if (isVisbugArtifactProperty(change.property)) {
-    hints.push('⏭ не применять в CSS')
-    return hints
-  }
-
-  const prop = change.property
-
-  if (prop === 'left' || prop === 'top') {
-    hints.push('💡 Move VisBug → в исходниках transform: translate(x, y), не margin/left')
-  }
-
-  return hints
+  return lines
 }
 
 function formatChangeLine(index, c) {
-  switch (c.type) {
+  const enriched = enrichChangeSelectors({
+    ...c,
+    fileHint: c.fileHint ?? resolveTargetFile(c),
+  })
+  const selectorPrefix = formatSelectorLines(enriched).join('\n  ')
+
+  switch (enriched.type) {
     case 'style':
-      return `[${index}] ${c.selector} → стиль: ${c.property} = ${c.newValue} (было: ${formatOldValue(c.oldValue)})`
+      return [
+        `[${index}]`,
+        `  ${selectorPrefix}`,
+        `  → стиль: ${enriched.property} = ${enriched.newValue} (было: ${formatOldValue(enriched.oldValue)})`,
+      ].join('\n')
     case 'attribute':
-      return `[${index}] ${c.selector} → атрибут ${c.attribute} = "${c.newValue}" (было: "${formatOldValue(c.oldValue)}")`
+      return [
+        `[${index}]`,
+        `  ${selectorPrefix}`,
+        `  → атрибут ${enriched.attribute} = "${enriched.newValue}" (было: "${formatOldValue(enriched.oldValue)}")`,
+      ].join('\n')
     case 'text':
-      return `[${index}] ${c.selector} → текст: "${c.newValue}" (было: "${formatOldValue(c.oldValue)}")`
+      return [
+        `[${index}]`,
+        `  ${selectorPrefix}`,
+        `  → текст: "${enriched.newValue}" (было: "${formatOldValue(enriched.oldValue)}")`,
+      ].join('\n')
+    case 'layout-delta':
+      return formatLayoutDeltaBufferLine(index, enriched)
     case 'node-added':
-      return `[${index}] ${c.parentSelector ?? c.selector} → добавлен узел: ${(c.html ?? '').slice(0, 80)}…`
+      return `[${index}] ${enriched.parentSelector ?? enriched.selector} → добавлен узел: ${(enriched.html ?? '').slice(0, 80)}…`
     case 'node-removed':
-      return `[${index}] ${c.parentSelector ?? c.selector} → удалён узел <${c.tag}>`
+      return `[${index}] ${enriched.parentSelector ?? enriched.selector} → удалён узел <${enriched.tag}>`
     default:
-      return `[${index}] ${JSON.stringify(c)}`
+      return `[${index}] ${JSON.stringify(enriched)}`
   }
 }
 
 /**
- * @param {number} index
- * @param {object} c
- * @param {{ hints?: boolean }} [options]
+ * @param {object[]} changes
+ * @param {{ type?: string, workspace?: string | null, includeActions?: boolean, legacy?: boolean, stamps?: object[] }} [opts]
  */
-export function formatChangeLineWithHints(index, c, { hints = true } = {}) {
-  const lines = [formatChangeLine(index, c)]
-  if (hints) {
-    for (const hint of getApplyHints(c)) {
-      lines.push(`  ${hint}`)
+export function formatChangesFromStore(changes, { type, workspace, includeActions = true, legacy = false, stamps = [] } = {}) {
+  const pending = changes
+    .filter((c) => !c.applied && (!type || c.type === type))
+    .map((c) => enrichChangeSelectors({
+      ...c,
+      fileHint: c.fileHint ?? resolveTargetFile(c),
+    }))
+
+  if (!pending.length) return ''
+
+  // Default: write-recipes (одна готовая CSS-правка на узел)
+  if (!legacy) {
+    const recipes = compileWriteRecipes(pending)
+    if (!recipes.length) return ''
+    const body = formatWriteRecipesBuffer(recipes, { workspace, stamps })
+    if (!includeActions) return body
+    const jsonBlock = formatActionsJsonBlock(pending)
+    return jsonBlock ? `${body}\n\n${jsonBlock}` : body
+  }
+
+  const fileGroups = new Map()
+  for (const change of pending) {
+    const file = change.fileHint ?? resolveTargetFile(change)
+    if (!fileGroups.has(file)) fileGroups.set(file, [])
+    fileGroups.get(file).push(change)
+  }
+
+  const header = ['=== VisBug session ===']
+  if (workspace) header.push(`workspace: ${workspace}`)
+  const fileSummary = [...fileGroups.entries()]
+    .map(([file, items]) => `${file} (${items.length})`)
+    .join(', ')
+  header.push(`files: ${fileSummary}`)
+  header.push(`store: v${STORE_VERSION}`)
+  header.push('')
+
+  const sections = []
+  let globalIndex = 0
+  for (const [file, items] of fileGroups) {
+    sections.push(`--- ${file} ---`)
+    for (const item of items) {
+      sections.push(formatChangeLine(globalIndex, item))
+      globalIndex += 1
     }
-  }
-  return lines.join('\n')
-}
-
-const MISC_SECTION_LABEL = 'Прочее'
-
-/**
- * @param {Array<{ c: object, index: number }>} items
- * @returns {Map<string, Array<{ c: object, index: number }>>}
- */
-export function groupChangesBySection(items) {
-  const groups = new Map()
-  const order = []
-
-  for (const item of items) {
-    const key = extractSectionKey(item.c.selector ?? item.c.parentSelector ?? '') ?? MISC_SECTION_LABEL
-    if (!groups.has(key)) {
-      groups.set(key, [])
-      order.push(key)
-    }
-    groups.get(key).push(item)
+    sections.push('')
   }
 
-  // «Прочее» всегда в конце
-  const miscIdx = order.indexOf(MISC_SECTION_LABEL)
-  if (miscIdx !== -1 && miscIdx !== order.length - 1) {
-    order.splice(miscIdx, 1)
-    order.push(MISC_SECTION_LABEL)
-  }
+  const body = [...header, ...sections].join('\n').trimEnd()
+  if (!includeActions) return body
 
-  return { groups, order }
+  const actionsBlock = formatActionsJsonBlock(pending)
+  return actionsBlock ? `${body}\n\n${actionsBlock}` : body
 }
 
-/**
- * @param {Array<{ c: object, index: number }>} items
- * @param {{ hints?: boolean }} [options]
- */
-export function formatGroupedChanges(items, { hints = true } = {}) {
-  if (items.length === 0) return ''
-
-  const { groups, order } = groupChangesBySection(items)
-  const blocks = []
-
-  for (const key of order) {
-    const sectionItems = groups.get(key) ?? []
-    const header = key === MISC_SECTION_LABEL ? `## ${MISC_SECTION_LABEL}` : `## #${key}`
-    const lines = sectionItems.map(({ c, index }) => formatChangeLineWithHints(index, c, { hints }))
-    blocks.push([header, ...lines].join('\n'))
-  }
-
-  return blocks.join('\n\n')
-}
-
-export function formatChangesFromStore(changes, { type, grouped = true, hints = true } = {}) {
-  const items = changes
-    .map((c, index) => ({ c, index }))
-    .filter(({ c }) => !c.applied && (!type || c.type === type))
-
-  if (items.length === 0) return ''
-
-  if (!grouped) {
-    return items.map(({ c, index }) => formatChangeLineWithHints(index, c, { hints })).join('\n')
-  }
-
-  return formatGroupedChanges(items, { hints })
-}
-
-/** @deprecated используйте formatChangesFromStore */
-export function formatForClaude(changes) {
-  return formatChangesFromStore(changes)
-}
+export { compileChangesToActions, compileWriteRecipes, STORE_VERSION }

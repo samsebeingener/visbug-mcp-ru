@@ -1,259 +1,478 @@
 /**
- * visbug-mcp — content-script.js (режим «Запись» по умолчанию)
+ * visbug-mcp — content-script.js (live mutations, модель mambari)
  */
 
 if (globalThis.__visbugMcpContentScriptLoaded) {
-  // уже загружен через manifest — не дублировать WS/listeners
+  // уже загружен
 } else {
   globalThis.__visbugMcpContentScriptLoaded = true
 
-const WS_URL = 'ws://127.0.0.1:4844'
-const RECONNECT_DELAY = 2000
-const LIVE_OBSERVER_ENABLED = false // с v0.2.0 основной режим — snapshot по кнопке «Начать/Стоп»
+  const WS_URL = 'ws://127.0.0.1:4844'
+  const RECONNECT_DELAY = 2000
+  const VISBUG_ATTR = ['style', 'class', 'src', 'href', 'alt', 'title', 'contenteditable']
+  const BRIDGE_OVERLAY_SELECTOR =
+    '#visbug-mcp-guides-root, #visbug-mcp-recording-badge, #visbug-mcp-apply-toast, [data-visbug-mcp]'
 
-const snap = () => globalThis.VisbugMcpSnapshot
-const reactSrc = () => globalThis.VisbugMcpReactSourceBridge
-const guides = () => globalThis.VisbugMcpAlignmentGuides
-const badge = () => globalThis.VisbugMcpRecordingBadge
-const textWatch = () => globalThis.VisbugMcpRecordingTextWatch
-const uiTrim = () => globalThis.VisbugMcpUiTrim
+  const snap = () => globalThis.VisbugMcpSnapshot
+  const guides = () => globalThis.VisbugMcpAlignmentGuides
+  const lever = () => globalThis.VisbugMcpLayoutLever
+  const autoStamp = () => globalThis.VisbugMcpAutoStamp
 
-let socket = null
-let connected = false
-let recordingBefore = null
-let recordingRootSelector = null
-let recordingScopeRoot = null
+  let socket = null
+  let connected = false
+  let guidesArmed = false
 
-function clearVisbugPageState() {
-  recordingBefore = null
-  recordingRootSelector = null
-  recordingScopeRoot = null
-  globalThis.__visbugMcpRecordingActive = false
-  globalThis.__visbugMcpRecordingRoot = null
-  guides()?.stop()
-  badge()?.stop()
-  textWatch()?.stop()
-  uiTrim()?.uninstall()
-  const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
-  removed.forEach(k => localStorage.removeItem(k))
-}
+  function armGuides() {
+    if (guidesArmed) return
+    const root = snap()?.getDefaultSnapshotRoot?.(document) ?? document.body
+    globalThis.VisbugMcpReactBridge?.stampAll?.(root)
+    guides()?.start?.(root, getSelector)
+    guidesArmed = Boolean(guides())
+  }
 
-function showApplyToast(msg) {
-  const text = String(msg?.summary || msg?.message || '').trim()
-  if (!text) return
-  const id = 'visbug-mcp-apply-toast'
-  document.getElementById(id)?.remove()
-  const el = document.createElement('div')
-  el.id = id
-  el.setAttribute('role', 'status')
-  const ok = msg?.event === 'auto-applied' && !(msg?.failed?.length)
-  el.style.cssText = [
-    'position:fixed',
-    'left:50%',
-    'bottom:24px',
-    'transform:translateX(-50%)',
-    'z-index:2147483646',
-    'max-width:min(520px,92vw)',
-    'padding:14px 16px',
-    'border-radius:12px',
-    `background:${ok ? 'rgba(20,83,45,0.96)' : 'rgba(69,10,10,0.96)'}`,
-    `border:1px solid ${ok ? '#4ade80' : '#f87171'}`,
-    'color:#fff',
-    'font:600 13px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif',
-    'white-space:pre-wrap',
-    'box-shadow:0 8px 28px rgba(0,0,0,0.35)',
-    'pointer-events:none',
-  ].join(';')
-  el.textContent = text
-  document.documentElement.appendChild(el)
-  setTimeout(() => el.remove(), ok ? 6500 : 12000)
-}
+  function disarmGuides() {
+    guides()?.stop?.()
+    guidesArmed = false
+  }
 
-function connect() {
-  socket = new WebSocket(WS_URL)
-
-  socket.addEventListener('open', () => {
-    connected = true
-    console.debug('[visbug-mcp] connected')
-  })
-
-  socket.addEventListener('message', (e) => {
+  function getSelector(el) {
     try {
-      const msg = JSON.parse(e.data)
-      // Только чистим localStorage VisBug. Активную запись/badge НЕ трогаем —
-      // иначе clear после «Начать запись» убивает снимок «до» и индикатор.
-      if (msg.event === 'clear-visbug-storage') {
-        const removed = Object.keys(localStorage).filter(k => /visbug|vis-bug/i.test(k))
-        removed.forEach(k => localStorage.removeItem(k))
+      if (!el || el.nodeType !== Node.ELEMENT_NODE) return 'body'
+      if (el === document.body || el === document.documentElement) return 'body'
+      if (el.id) return `#${CSS.escape(el.id)}`
+
+      const attrs = el.attributes ? Array.from(el.attributes) : []
+      const vueAttr = attrs.find((a) => a.name.startsWith('data-v-'))
+      if (vueAttr) {
+        const tag = el.tagName.toLowerCase()
+        const cls = el.classList?.length ? `.${[...el.classList].map(CSS.escape).join('.')}` : ''
+        return `${tag}[${vueAttr.name}]${cls}`
       }
-      if (
-        msg.event === 'auto-applied'
-        || msg.event === 'apply-incomplete'
-        || msg.event === 'auto-applied-partial'
-        || msg.event === 'agent-fallback-finished'
-      ) {
-        showApplyToast(msg)
-      }
-    } catch {}
-  })
 
-  socket.addEventListener('close', () => {
-    connected = false
-    setTimeout(connect, RECONNECT_DELAY)
-  })
-
-  socket.addEventListener('error', () => {})
-}
-
-function send(payload) {
-  if (connected && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(payload))
-  }
-}
-
-function getSelector(el) {
-  try {
-    if (!el || el.nodeType !== Node.ELEMENT_NODE) return 'body'
-    if (el === document.body || el === document.documentElement) return 'body'
-    if (el.id) return `#${CSS.escape(el.id)}`
-
-    const attrs = el.attributes ? Array.from(el.attributes) : []
-    const vueAttr = attrs.find(a => a.name.startsWith('data-v-'))
-    if (vueAttr) {
       const tag = el.tagName.toLowerCase()
-      const cls = el.classList?.length ? '.' + [...el.classList].map(CSS.escape).join('.') : ''
-      return `${tag}[${vueAttr.name}]${cls}`
+      const parent = el.parentElement
+      if (!parent || parent === document.documentElement) return tag
+      const siblings = Array.from(parent?.children || []).filter((c) => c.tagName === el.tagName)
+      const idx = siblings.indexOf(el) + 1
+      const nthPart = siblings.length > 1 ? `:nth-of-type(${idx})` : ''
+      const cls = el.classList?.length ? `.${[...el.classList].map(CSS.escape).join('.')}` : ''
+      return `${getSelector(parent)} > ${tag}${cls}${nthPart}`
+    } catch {
+      return 'body'
+    }
+  }
+
+  function connect() {
+    socket = new WebSocket(WS_URL)
+
+    socket.addEventListener('open', () => {
+      connected = true
+      armGuides()
+      socket.send(JSON.stringify({ event: 'popup-start-editing', url: location.href }))
+      console.debug('[visbug-mcp] connected, guides armed (visible on drag only)')
+    })
+
+    socket.addEventListener('message', (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.event === 'clear-visbug-storage') {
+          const removed = Object.keys(localStorage).filter((k) => /visbug|vis-bug/i.test(k))
+          removed.forEach((k) => localStorage.removeItem(k))
+        }
+      } catch {}
+    })
+
+    socket.addEventListener('close', () => {
+      connected = false
+      disarmGuides()
+      setTimeout(connect, RECONNECT_DELAY)
+    })
+
+    socket.addEventListener('error', () => {})
+  }
+
+  function send(payload) {
+    if (connected && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(payload))
+    }
+  }
+
+  /** Отправить мутации вместе с новыми auto-stamp штампами (v0.26). */
+  function sendMutations(mutations) {
+    const stamps = autoStamp()?.consumeStamps?.() ?? []
+    send({ event: 'mutations', url: location.href, mutations, stamps })
+  }
+
+  /**
+   * v0.26: проштамповать элемент, получивший записанную мутацию,
+   * и прикрепить stampId к его мутациям.
+   * @param {Element | null} el
+   * @param {object[]} mutations
+   */
+  function stampMutationTarget(el, mutations) {
+    if (!el || el.nodeType !== Node.ELEMENT_NODE || !mutations.length) return
+    if (isBridgeOverlayNode(el) || isVisBugDomNode(el)) return
+    const stampId = autoStamp()?.ensureStamped?.(el, getSelector)
+    if (!stampId) return
+    mutations.forEach((m) => { m.stampId = stampId })
+  }
+
+  function parseCSSChanges(oldStyle, newStyle) {
+    const parse = (s) => {
+      const map = {}
+      if (!s) return map
+      s.split(';').forEach((decl) => {
+        const [prop, ...rest] = decl.split(':')
+        if (prop && rest.length) map[prop.trim()] = rest.join(':').trim()
+      })
+      return map
+    }
+    const oldMap = parse(oldStyle)
+    const newMap = parse(newStyle)
+    const allProps = new Set([...Object.keys(oldMap), ...Object.keys(newMap)])
+    const changes = []
+    allProps.forEach((prop) => {
+      if (oldMap[prop] !== newMap[prop]) {
+        changes.push({ property: prop, old: oldMap[prop] || null, new: newMap[prop] || null })
+      }
+    })
+    return changes
+  }
+
+  function isVisBugDomNode(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return false
+    const tag = node.tagName?.toLowerCase() ?? ''
+    if (tag === 'vis-bug' || tag.startsWith('vis-') || tag.startsWith('visbug') || tag.startsWith('eye-')) {
+      return true
+    }
+    if (tag === 'script') {
+      const src = node.getAttribute?.('src') ?? ''
+      if (/^chrome-extension:\/\//i.test(src)) return true
+    }
+    return false
+  }
+
+  function isVisBugDomChildList(record) {
+    if (record.type !== 'childList') return false
+    const elements = [...record.addedNodes, ...record.removedNodes].filter(
+      (n) => n.nodeType === Node.ELEMENT_NODE,
+    )
+    return elements.length > 0 && elements.every((n) => isVisBugDomNode(n))
+  }
+
+  function isBridgeOverlayNode(node) {
+    if (!node) return false
+    const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
+    if (!el?.closest) return false
+    if (el.closest(BRIDGE_OVERLAY_SELECTOR) || el.closest('vis-bug')) return true
+    const tag = (node.nodeType === Node.ELEMENT_NODE ? node : el)?.tagName?.toLowerCase()
+    if (tag && ['svg', 'g', 'line', 'text', 'rect', 'circle', 'path'].includes(tag)) {
+      return Boolean(el.closest('#visbug-mcp-guides-root'))
+    }
+    return false
+  }
+
+  function parseMutation(record) {
+    if (isBridgeOverlayNode(record.target)) return []
+    const el = record.target
+    const selector = getSelector(el)
+    const timestamp = Date.now()
+
+    if (record.type === 'attributes') {
+      const attr = record.attributeName
+      if (attr === 'style') {
+        const DRAG_NOISE = new Set([
+          'cursor', 'user-select', 'transition', 'will-change',
+          'position', 'left', 'top', 'right', 'bottom',
+        ])
+        return parseCSSChanges(record.oldValue, el.getAttribute(attr))
+          .filter((c) => !DRAG_NOISE.has(c.property))
+          .filter((c) => c.new !== 'undefined' && c.new !== 'null')
+          .map((c) => ({
+            type: 'style',
+            selector,
+            property: c.property,
+            oldValue: c.old,
+            newValue: c.new,
+            tag: el.tagName.toLowerCase(),
+            timestamp,
+          }))
+      }
+      return [{
+        type: 'attribute',
+        selector,
+        attribute: attr,
+        oldValue: record.oldValue,
+        newValue: el.getAttribute(attr),
+        tag: el.tagName.toLowerCase(),
+        timestamp,
+      }]
     }
 
-    const tag = el.tagName.toLowerCase()
-    const parent = el.parentElement
-    if (!parent || parent === document.documentElement) return tag
-    const siblings = Array.from(parent?.children || []).filter(c => c.tagName === el.tagName)
-    const idx = siblings.indexOf(el) + 1
-    const nthPart = siblings.length > 1 ? `:nth-of-type(${idx})` : ''
-    const cls = el.classList?.length ? '.' + [...el.classList].map(CSS.escape).join('.') : ''
-    return `${getSelector(parent)} > ${tag}${cls}${nthPart}`
-  } catch {
-    return 'body'
+    if (record.type === 'characterData') {
+      return [{
+        type: 'text',
+        selector: getSelector(el.parentElement),
+        oldValue: record.oldValue,
+        newValue: el.textContent,
+        tag: el.parentElement?.tagName.toLowerCase(),
+        timestamp,
+      }]
+    }
+
+    if (record.type === 'childList') {
+      const mutations = []
+      const removedTexts = [...record.removedNodes].filter((n) => n.nodeType === Node.TEXT_NODE)
+      const addedTexts = [...record.addedNodes].filter((n) => n.nodeType === Node.TEXT_NODE)
+      if (removedTexts.length > 0 || addedTexts.length > 0) {
+        const oldValue = removedTexts.map((n) => n.textContent).join('') || null
+        const newValue = addedTexts.map((n) => n.textContent).join('')
+          || (el.nodeType === Node.ELEMENT_NODE ? el.textContent : null)
+        if (oldValue !== newValue) {
+          mutations.push({
+            type: 'text',
+            selector,
+            oldValue,
+            newValue,
+            tag: el.tagName?.toLowerCase(),
+            timestamp,
+          })
+        }
+      }
+      record.addedNodes.forEach((node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE || isVisBugDomNode(node)) return
+        mutations.push({
+          type: 'node-added',
+          selector: getSelector(node),
+          parentSelector: selector,
+          html: node.outerHTML?.slice(0, 300),
+          tag: node.tagName.toLowerCase(),
+          timestamp,
+        })
+      })
+      record.removedNodes.forEach((node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE || isVisBugDomNode(node)) return
+        mutations.push({
+          type: 'node-removed',
+          selector,
+          parentSelector: selector,
+          tag: node.tagName.toLowerCase(),
+          timestamp,
+        })
+      })
+      return mutations
+    }
+
+    return []
   }
-}
 
-function startRecordingSnapshot() {
-  // Не вызываем полный clearVisbugPageState() — он гасит badge до старта.
-  // Сбрасываем только предыдущую сессию записи.
-  recordingBefore = null
-  recordingRootSelector = null
-  recordingScopeRoot = null
-  guides()?.stop()
-  textWatch()?.stop()
-
-  recordingScopeRoot = snap().getDefaultSnapshotRoot(document)
-  const root = recordingScopeRoot
-  const bridgeStats = reactSrc()?.annotateRecordingRoot?.(root)
-  if (bridgeStats?.annotated) {
-    console.debug('[visbug-mcp] react-source-bridge:', bridgeStats.annotated, 'elements tagged')
-  }
-  globalThis.__visbugMcpRecordingActive = true
-  globalThis.__visbugMcpRecordingRoot = root
-  recordingRootSelector = getSelector(root)
-  recordingBefore = snap().captureSnapshot(root, getSelector)
-  globalThis.__visbugMcpRecordingBefore = recordingBefore
-  guides()?.start(recordingScopeRoot, getSelector)
-  uiTrim()?.install()
-  badge()?.start()
-  textWatch()?.start(recordingScopeRoot, getSelector, { url: location.href })
-  console.debug('[visbug-mcp] alignment guides ON', Boolean(guides()))
-  send({
-    event: 'recording-started',
-    url: location.href,
-    rootSelector: recordingRootSelector,
-    elementCount: recordingBefore.length,
-    guides: true,
-  })
-  console.debug('[visbug-mcp] snapshot before:', recordingRootSelector, recordingBefore.length, 'elements')
-}
-
-function finishRecordingSnapshot() {
-  if (!recordingBefore) {
-    guides()?.stop()
-    badge()?.stop()
-    textWatch()?.stop()
-    uiTrim()?.uninstall()
-    send({ event: 'recording-error', url: location.href, message: 'Снимок «до» не найден. Нажмите «Начать запись» ещё раз.' })
-    return
+  function isVisBugInternal(record) {
+    if (isBridgeOverlayNode(record.target)) return true
+    if (isVisBugDomChildList(record)) return true
+    if (record.target?.nodeType === Node.ELEMENT_NODE && isVisBugDomNode(record.target)) return true
+    const tag = record.target?.tagName?.toLowerCase()
+    return tag?.startsWith('vis-') || tag?.startsWith('visbug') || tag?.startsWith('eye-') || tag === 'visbug'
   }
 
-  // Дать VisBug дописать inline-стили после drag
-  requestAnimationFrame(() => {
+  const POSITION_PROPS = new Set([
+    'top', 'left', 'right', 'bottom', 'transform', 'width', 'height',
+  ])
+
+  /** @type {Map<string, { el: Element, selector: string, rectBefore: DOMRectReadOnly, viewport: { width: number, height: number } }>} */
+  const dragSessions = new Map()
+  let commitScheduled = false
+
+  function roundPx(value) {
+    return Math.round(value)
+  }
+
+  const LAYOUT_DELTA_MAX_RATIO = 0.75
+
+  function isSuspiciousLayoutDelta(deltaX, deltaY, viewport) {
+    const lib = lever()
+    if (lib?.isSuspiciousDelta) return lib.isSuspiciousDelta(deltaX, deltaY, viewport)
+    const vw = viewport?.width ?? window.innerWidth
+    const vh = viewport?.height ?? window.innerHeight
+    const limit = Math.max(vw, vh) * LAYOUT_DELTA_MAX_RATIO
+    return Math.abs(deltaX) > limit || Math.abs(deltaY) > limit
+  }
+
+  function captureParentLayout(el) {
+    const parentEl = el?.parentElement
+    if (!(parentEl instanceof HTMLElement)) return null
+    const cs = getComputedStyle(parentEl)
+    return {
+      selector: getSelector(parentEl),
+      display: cs.display,
+      flexDirection: cs.flexDirection,
+      justifyContent: cs.justifyContent,
+      alignItems: cs.alignItems,
+      gap: cs.gap,
+      gridTemplateColumns: cs.gridTemplateColumns,
+    }
+  }
+
+  function beginDragSession(el, selector) {
+    if (!el || el.nodeType !== Node.ELEMENT_NODE || isBridgeOverlayNode(el)) return
+    if (dragSessions.has(selector)) return
+    const rect = el.getBoundingClientRect()
+    const lib = lever()
+    const offsetBefore = lib?.readOffsetFromComputedStyle
+      ? lib.readOffsetFromComputedStyle(getComputedStyle(el))
+      : null
+    dragSessions.set(selector, {
+      el,
+      selector,
+      rectBefore: {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+      },
+      offsetBefore,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+    })
+  }
+
+  function flushDragSessions() {
+    if (dragSessions.size === 0 || commitScheduled) return
+    commitScheduled = true
+    const sessions = [...dragSessions.values()]
+    dragSessions.clear()
+
     requestAnimationFrame(() => {
-      const root = recordingScopeRoot ?? snap().getDefaultSnapshotRoot(document)
-      reactSrc()?.annotateRecordingRoot?.(root)
-      const after = snap().captureSnapshot(root, getSelector)
-      const snapshotChanges = snap().diffSnapshots(recordingBefore, after, { url: location.href })
-      const watchedText = textWatch()?.drainChanges?.() ?? []
-      textWatch()?.stop()
-      const changes = snap().mergeTextChanges
-        ? snap().mergeTextChanges(snapshotChanges, watchedText)
-        : snapshotChanges
+      commitScheduled = false
+      const layoutMutations = []
+      const timestamp = Date.now()
 
-      const alignRefs = guides()?.consumeAlignReferences?.() ?? []
-      if (alignRefs.length && guides()?.attachAlignToChanges) {
-        guides().attachAlignToChanges(changes, alignRefs)
-        console.debug('[visbug-mcp] align references:', alignRefs.length)
+      for (const session of sessions) {
+        const { el, selector, rectBefore, offsetBefore, viewport } = session
+        if (!el?.isConnected) continue
+        const rectAfter = el.getBoundingClientRect()
+        const deltaX = roundPx(rectAfter.left - rectBefore.left)
+        const deltaY = roundPx(rectAfter.top - rectBefore.top)
+        const deltaW = roundPx(rectAfter.width - rectBefore.width)
+        const deltaH = roundPx(rectAfter.height - rectBefore.height)
+        if (deltaX === 0 && deltaY === 0 && deltaW === 0 && deltaH === 0) continue
+        const moved = deltaX !== 0 || deltaY !== 0
+        const resized = deltaW !== 0 || deltaH !== 0
+        const editIntent = moved ? (resized ? 'move+resize' : 'move') : 'resize'
+        if (isSuspiciousLayoutDelta(deltaX, deltaY, viewport)) {
+          console.debug('[visbug-mcp] skip suspicious layout-delta', selector, deltaX, deltaY)
+          continue
+        }
+
+        const rectBeforeRounded = {
+          left: roundPx(rectBefore.left),
+          top: roundPx(rectBefore.top),
+          width: roundPx(rectBefore.width),
+          height: roundPx(rectBefore.height),
+        }
+        const rectAfterRounded = {
+          left: roundPx(rectAfter.left),
+          top: roundPx(rectAfter.top),
+          width: roundPx(rectAfter.width),
+          height: roundPx(rectAfter.height),
+        }
+
+        const layoutContext = guides()?.captureLayoutContext?.(el, getSelector, rectBeforeRounded)
+          ?? null
+        const parentLayout = layoutContext?.parent ?? captureParentLayout(el)
+        const lib = lever()
+        const offsetAfter = lib?.readOffsetFromComputedStyle
+          ? lib.readOffsetFromComputedStyle(getComputedStyle(el))
+          : null
+        const leverHint = lib?.suggestLever
+          ? lib.suggestLever(parentLayout)
+          : 'transform'
+
+        // Code Connect lite: stamp Fiber → data-visbug-src before read
+        globalThis.VisbugMcpReactBridge?.ensureStamped?.(el)
+        const snapApi = snap()
+        const visbugSrc = snapApi?.readVisbugSrc?.(el)
+          ?? globalThis.VisbugMcpReactBridge?.ensureStamped?.(el)
+          ?? null
+        const stableId = snapApi?.readStableId?.(el) ?? null
+        const sourceRef = snapApi?.readSourceRef?.(el) ?? null
+        // v0.26: auto-stamp для узла без стабильного id
+        const stampId = autoStamp()?.ensureStamped?.(el, getSelector) ?? null
+
+        layoutMutations.push({
+          type: 'layout-delta',
+          selector,
+          tag: el.tagName.toLowerCase(),
+          deltaX,
+          deltaY,
+          deltaW,
+          deltaH,
+          editIntent,
+          rectBefore: rectBeforeRounded,
+          rectAfter: rectAfterRounded,
+          offsetBefore,
+          offsetAfter,
+          lever: leverHint,
+          parentLayout,
+          layoutContext: layoutContext ?? undefined,
+          viewport,
+          visbugSrc,
+          stableId,
+          sourceRef,
+          stampId,
+          timestamp,
+        })
       }
 
-      send({
-        event: 'recording-result',
-        format: 2,
-        url: location.href,
-        rootSelector: recordingRootSelector,
-        changes,
-      })
-
-      recordingBefore = null
-      globalThis.__visbugMcpRecordingBefore = null
-      recordingScopeRoot = null
-      globalThis.__visbugMcpRecordingActive = false
-      globalThis.__visbugMcpRecordingRoot = null
-      guides()?.stop()
-      badge()?.stop()
-      uiTrim()?.uninstall()
-      console.debug('[visbug-mcp] snapshot diff:', changes.length, 'changes', changes)
+      if (layoutMutations.length > 0) {
+        const alignRefs = guides()?.consumeAlignReferences?.() ?? []
+        guides()?.attachAlignToChanges?.(layoutMutations, alignRefs)
+        const layoutIntents = guides()?.consumeLayoutIntents?.() ?? []
+        guides()?.attachLayoutIntentToChanges?.(layoutMutations, layoutIntents)
+        sendMutations(layoutMutations)
+      }
     })
+  }
+
+  window.addEventListener('pointerup', flushDragSessions, true)
+  window.addEventListener('mouseup', flushDragSessions, true)
+
+  const observer = new MutationObserver((records) => {
+    const mutations = []
+    records.forEach((record) => {
+      if (isVisBugInternal(record)) return
+      if (record.type === 'attributes' && !VISBUG_ATTR.includes(record.attributeName)) return
+
+      if (record.type === 'attributes' && record.attributeName === 'style') {
+        const el = record.target
+        if (el?.nodeType === Node.ELEMENT_NODE) {
+          const selector = getSelector(el)
+          const styleChanges = parseCSSChanges(record.oldValue, el.getAttribute('style'))
+          if (styleChanges.some((c) => POSITION_PROPS.has(c.property))) {
+            beginDragSession(el, selector)
+          }
+        }
+      }
+
+      const parsed = parseMutation(record)
+      if (parsed.length) {
+        const targetEl = record.type === 'characterData' ? record.target?.parentElement : record.target
+        stampMutationTarget(targetEl, parsed)
+        mutations.push(...parsed)
+      }
+    })
+    if (mutations.length === 0) return
+    sendMutations(mutations)
   })
+
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeOldValue: true,
+    characterData: true,
+    characterDataOldValue: true,
+    childList: true,
+    subtree: true,
+    attributeFilter: VISBUG_ATTR,
+  })
+
+  connect()
+  console.debug('[visbug-mcp] live observer on', location.href)
 }
-
-// Live observer отключён — см. LIVE_MUTATIONS_ENABLED в ws-daemon.js
-
-window.addEventListener('visbug-mcp-recording-control', (event) => {
-  if (event.detail?.action === 'stop') finishRecordingSnapshot()
-})
-
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg.type === 'visbug-ping') {
-    sendResponse({ ok: true })
-    return true
-  }
-
-  if (msg.type !== 'visbug-recording') return
-
-  try {
-    if (msg.action === 'start') {
-      startRecordingSnapshot()
-      sendResponse({ ok: true })
-    } else if (msg.action === 'stop') {
-      finishRecordingSnapshot()
-      sendResponse({ ok: true })
-    } else {
-      sendResponse({ ok: false, error: 'Неизвестное действие записи.' })
-    }
-  } catch (err) {
-    sendResponse({ ok: false, error: err?.message ?? 'Ошибка записи.' })
-  }
-  return true
-})
-
-connect()
-console.debug('[visbug-mcp] режим «Запись» (snapshot), live observer:', LIVE_OBSERVER_ENABLED)
-
-} // __visbugMcpContentScriptLoaded

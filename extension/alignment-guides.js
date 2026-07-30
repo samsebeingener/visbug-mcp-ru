@@ -1,10 +1,10 @@
 /**
  * Figma-like alignment guides during recording.
- * Idle: только рамка вёрстки (лево / центр / право / верх / низ).
  * Drag/resize: красные линии к соседям при сближении + px.
+ * Overlay включается только на время drag/resize, не постоянно.
  */
 
-const GUIDES_BUILD = 6
+const GUIDES_BUILD = 7
 
 // Всегда переинициализируем модуль (reload расширения / F5) — иначе stop() без start().
 globalThis.VisbugMcpAlignmentGuides?.stop?.()
@@ -257,6 +257,7 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
       distance: Math.round(match.distance),
       reference: {
         selector: getSelector(match.otherEl),
+        tag: match.otherEl?.tagName?.toLowerCase?.() ?? '',
         edge: match.refKind,
         rect: {
           left: Math.round(refRect.left),
@@ -274,13 +275,159 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
     }
   }
 
+  function roundRect(rect) {
+    return {
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    }
+  }
+
+  function readComputed(el, keys) {
+    if (!el || !keys.length) return {}
+    const cs = getComputedStyle(el)
+    const out = {}
+    for (const key of keys) {
+      out[key] = cs[key] ?? ''
+    }
+    return out
+  }
+
+  const NEXT_WRAPPER_TAGS = new Set(['div', 'section'])
+
+  function findNextWrapper(draggedEl, referenceEl, alignPayload) {
+    if (!(draggedEl instanceof HTMLElement)) return null
+
+    const draggedTag = draggedEl.tagName.toLowerCase()
+    if (draggedTag === 'h1' && draggedEl.parentElement instanceof HTMLElement) {
+      const parent = draggedEl.parentElement
+      if (NEXT_WRAPPER_TAGS.has(parent.tagName.toLowerCase())) {
+        return parent
+      }
+    }
+
+    if (alignPayload?.axis !== 'y' || !(referenceEl instanceof HTMLElement)) return null
+
+    const parent = referenceEl.parentElement
+    if (!(parent instanceof HTMLElement)) return null
+
+    let afterRef = false
+    for (const child of parent.children) {
+      if (child === referenceEl) {
+        afterRef = true
+        continue
+      }
+      if (!afterRef) continue
+      if (!(child instanceof HTMLElement)) continue
+      const childTag = child.tagName.toLowerCase()
+      if (NEXT_WRAPPER_TAGS.has(childTag)) {
+        return child
+      }
+    }
+    return null
+  }
+
+  function buildLayoutIntent(draggedEl, getSelector, alignPayload, referenceEl) {
+    if (!(draggedEl instanceof HTMLElement) || typeof getSelector !== 'function') return null
+
+    const dragRectAfter = roundRect(draggedEl.getBoundingClientRect())
+    let dragRectBefore
+    if (alignPayload?.dragRect) {
+      dragRectBefore = {
+        left: alignPayload.dragRect.left,
+        top: alignPayload.dragRect.top,
+        width: alignPayload.dragRect.width ?? dragRectAfter.width,
+        height: alignPayload.dragRect.height ?? dragRectAfter.height,
+      }
+    } else {
+      dragRectBefore = { ...dragRectAfter }
+    }
+
+    const targetRect = { ...dragRectBefore }
+
+    let parent = null
+    const parentEl = draggedEl.parentElement
+    if (parentEl instanceof HTMLElement) {
+      parent = {
+        selector: getSelector(parentEl),
+        tag: parentEl.tagName.toLowerCase(),
+        computed: readComputed(parentEl, [
+          'display',
+          'flexDirection',
+          'gap',
+          'alignItems',
+          'justifyContent',
+        ]),
+      }
+    }
+
+    let prevSibling = null
+    const prev = draggedEl.previousElementSibling
+    if (prev instanceof HTMLElement) {
+      prevSibling = {
+        selector: getSelector(prev),
+        tag: prev.tagName.toLowerCase(),
+        rect: roundRect(prev.getBoundingClientRect()),
+        computed: readComputed(prev, ['display', 'marginBottom']),
+      }
+    }
+
+    const nextWrapperEl = findNextWrapper(draggedEl, referenceEl, alignPayload)
+    let nextWrapper = null
+    if (nextWrapperEl instanceof HTMLElement) {
+      nextWrapper = {
+        selector: getSelector(nextWrapperEl),
+        tag: nextWrapperEl.tagName.toLowerCase(),
+        rect: roundRect(nextWrapperEl.getBoundingClientRect()),
+        computed: readComputed(nextWrapperEl, ['display', 'marginTop']),
+        containsTarget: nextWrapperEl.contains(draggedEl),
+      }
+    }
+
+    const align = alignPayload ? { ...alignPayload } : undefined
+
+    return {
+      version: 1,
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio || 1,
+      },
+      dragRectBefore,
+      dragRectAfter,
+      targetRect,
+      ...(parent ? { parent } : {}),
+      ...(prevSibling ? { prevSibling } : {}),
+      ...(nextWrapper ? { nextWrapper } : {}),
+      ...(align ? { align } : {}),
+    }
+  }
+
+  function isAttachTarget(change) {
+    if (change?.type === 'layout-delta') return true
+    if (change?.type !== 'style') return false
+    return change.property === 'left' || change.property === 'top'
+  }
+
   function attachAlignToChanges(changes, alignRefs) {
     if (!Array.isArray(changes) || !Array.isArray(alignRefs)) return changes
     const map = new Map(alignRefs.map((entry) => [entry.draggedSelector, entry.align]))
     for (const change of changes) {
-      if (change?.type !== 'style' || change.property !== 'left') continue
+      if (!isAttachTarget(change)) continue
       const align = map.get(change.selector)
       if (align && !change.align) change.align = align
+    }
+    return changes
+  }
+
+  function attachLayoutIntentToChanges(changes, layoutIntents) {
+    if (!Array.isArray(changes) || !Array.isArray(layoutIntents)) return changes
+    const map = new Map(layoutIntents.map((entry) => [entry.draggedSelector, entry.layoutIntent]))
+    for (const change of changes) {
+      if (!isAttachTarget(change)) continue
+      const layoutIntent = map.get(change.selector)
+      if (layoutIntent && !change.layoutIntent) change.layoutIntent = layoutIntent
     }
     return changes
   }
@@ -297,6 +444,7 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
     drawnNearLabelKeys: null,
     getSelector: null,
     alignBySelector: new Map(),
+    layoutIntentBySelector: new Map(),
 
     onScroll: null,
     onResize: null,
@@ -306,6 +454,7 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
     },
 
     createOverlay() {
+      if (this.host) return
       const host = document.createElement('div')
       host.id = 'visbug-mcp-guides-root'
       host.setAttribute('data-visbug-mcp', 'guides')
@@ -327,6 +476,32 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
       document.documentElement.appendChild(host)
       this.host = host
       this.svg = svg
+    },
+
+    ensureVisible() {
+      if (this.host) return
+      this.createOverlay()
+      if (!this.onScroll) {
+        this.onScroll = () => this._clearCandidates()
+        this.onResize = () => this._clearCandidates()
+        window.addEventListener('scroll', this.onScroll, { passive: true, capture: true })
+        window.addEventListener('resize', this.onResize, { passive: true })
+      }
+      if (!this.rafId) this.tick()
+    },
+
+    deactivateVisible() {
+      cancelAnimationFrame(this.rafId)
+      this.rafId = 0
+      if (this.onScroll) {
+        window.removeEventListener('scroll', this.onScroll, { capture: true })
+        window.removeEventListener('resize', this.onResize)
+        this.onScroll = null
+        this.onResize = null
+      }
+      this.host?.remove()
+      this.host = null
+      this.svg = null
     },
 
     getCandidates() {
@@ -536,19 +711,18 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
       this.svg.innerHTML = ''
       this.drawnNearLabelKeys = new Set()
 
-      // В покое и при drag — только рамка вёрстки (L/C/R + T/C/B)
-      this.drawFrameGuides()
-
       if (!this.draggedEl?.isConnected) {
         const active = this.findActiveDragElement()
         if (active) {
           this.draggedEl = active
           this.dragIdleFrames = 0
+          this.ensureVisible()
         } else {
           this.dragIdleFrames += 1
           if (this.dragIdleFrames > 45) {
             this.draggedEl = null
             this.candidates = []
+            this.deactivateVisible()
           }
           return
         }
@@ -556,6 +730,9 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
 
       this.dragIdleFrames = 0
       const dragRect = this.draggedEl.getBoundingClientRect()
+
+      // Рамка контейнера и красные линии — только пока элемент двигают
+      this.drawFrameGuides()
       this.drawDragOutline(dragRect)
 
       const matches = findAlignmentMatches(
@@ -582,10 +759,17 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
         if (snapped.length) {
           const best = snapped.sort((a, b) => a.distance - b.distance)[0]
           const draggedSelector = this.getSelector(this.draggedEl)
-          this.alignBySelector.set(
-            draggedSelector,
-            buildAlignPayload(best, this.getSelector),
+          const align = buildAlignPayload(best, this.getSelector)
+          this.alignBySelector.set(draggedSelector, align)
+          const layoutIntent = buildLayoutIntent(
+            this.draggedEl,
+            this.getSelector,
+            align,
+            best.otherEl,
           )
+          if (layoutIntent) {
+            this.layoutIntentBySelector.set(draggedSelector, layoutIntent)
+          }
         }
       }
     },
@@ -602,7 +786,7 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
       this.root = root
       this.getSelector = typeof getSelector === 'function' ? getSelector : null
       this.alignBySelector = new Map()
-      this.createOverlay()
+      this.layoutIntentBySelector = new Map()
 
       this.observer = new MutationObserver((records) => {
         for (const record of records) {
@@ -610,7 +794,6 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
           const el = record.target
           if (!(el instanceof HTMLElement) || shouldSkipElement(el)) continue
           const style = el.style
-          // Move И resize: height/width тоже включают направляющие (низ к низу)
           const moving = style.position || style.left || style.top || style.transform
             || style.right || style.bottom
           const resizing = style.height || style.width || style.minHeight || style.maxHeight
@@ -619,6 +802,7 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
             if (this.draggedEl !== el) this.candidates = []
             this.draggedEl = el
             this.dragIdleFrames = 0
+            this.ensureVisible()
           }
         }
       })
@@ -628,32 +812,18 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
         attributeFilter: ['style'],
         subtree: true,
       })
-
-      this.onScroll = () => this._clearCandidates()
-      this.onResize = () => this._clearCandidates()
-
-      window.addEventListener('scroll', this.onScroll, { passive: true, capture: true })
-      window.addEventListener('resize', this.onResize, { passive: true })
-      this.tick()
     },
 
     stop() {
-      cancelAnimationFrame(this.rafId)
-      this.rafId = 0
+      this.deactivateVisible()
       this.observer?.disconnect()
       this.observer = null
-      window.removeEventListener('scroll', this.onScroll, { capture: true })
-      window.removeEventListener('resize', this.onResize)
-      this.onScroll = null
-      this.onResize = null
-      this.host?.remove()
-      this.host = null
-      this.svg = null
       this.root = null
       this.draggedEl = null
       this.candidates = []
       this.getSelector = null
       this.alignBySelector = new Map()
+      this.layoutIntentBySelector = new Map()
     },
 
     exportAlignReferences() {
@@ -668,21 +838,38 @@ globalThis.VisbugMcpAlignmentGuides?.stop?.()
       this.alignBySelector.clear()
       return refs
     },
+
+    exportLayoutIntents() {
+      return [...this.layoutIntentBySelector.entries()].map(([draggedSelector, layoutIntent]) => ({
+        draggedSelector,
+        layoutIntent,
+      }))
+    },
+
+    consumeLayoutIntents() {
+      const intents = this.exportLayoutIntents()
+      this.layoutIntentBySelector.clear()
+      return intents
+    },
   }
 
   globalThis.VisbugMcpAlignmentGuides = {
     build: GUIDES_BUILD,
-    version: '0.8.1',
+    version: '0.8.2',
     start: (root, getSelector) => guides.start(root, getSelector),
     stop: () => guides.stop(),
     consumeAlignReferences: () => guides.consumeAlignReferences(),
     attachAlignToChanges: (changes, alignRefs) => attachAlignToChanges(changes, alignRefs),
-  }
-
-  // Reload расширения во время активной записи — восстановить направляющие.
-  if (globalThis.__visbugMcpRecordingActive && globalThis.__visbugMcpRecordingRoot) {
-    try {
-      globalThis.VisbugMcpAlignmentGuides.start(globalThis.__visbugMcpRecordingRoot)
-    } catch {}
+    consumeLayoutIntents: () => guides.consumeLayoutIntents(),
+    attachLayoutIntentToChanges: (changes, layoutIntents) => attachLayoutIntentToChanges(changes, layoutIntents),
+    captureLayoutContext: (draggedEl, getSelector, rectBefore) => {
+      if (!(draggedEl instanceof HTMLElement) || typeof getSelector !== 'function') return null
+      return buildLayoutIntent(
+        draggedEl,
+        getSelector,
+        rectBefore ? { dragRect: rectBefore } : null,
+        null,
+      )
+    },
   }
 })()

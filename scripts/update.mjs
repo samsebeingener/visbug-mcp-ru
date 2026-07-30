@@ -3,7 +3,7 @@
  * Безопасное обновление visbug-mcp-ru:
  * - git pull с autostash (локальные правки в репо не теряются)
  * - ~/.visbug-mcp/config.json и changes.json не перезаписываются
- * - команда visbug-mcp-update.md копируется в workspace, если её нет
+ * - команды и rule visbug-buffer-apply в workspace(ы) из config, если их нет
  */
 
 import { spawn, spawnSync } from 'child_process'
@@ -19,6 +19,7 @@ import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { loadConfig, saveConfig, DEFAULT_CONFIG } from '../src/config.js'
 import { clearPendingUpdate } from '../src/update-check.js'
+import { syncAllWorkspaceCursorArtifacts } from './sync-cursor-artifacts.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '..')
@@ -62,20 +63,14 @@ function mergeConfigPreservingUser() {
   return merged
 }
 
-function syncWorkspaceCommands(workspace) {
-  if (!workspace || !existsSync(workspace)) return
-  const destDir = join(workspace, '.cursor', 'commands')
-  mkdirSync(destDir, { recursive: true })
-  for (const name of ['visbug-mcp-update.md', 'visbug-apply.md']) {
-    const src = join(REPO_ROOT, '.cursor', 'commands', name)
-    const dest = join(destDir, name)
-    if (!existsSync(src)) continue
-    if (!existsSync(dest)) {
-      copyFileSync(src, dest)
-      console.log(`✅ Команда /${name.replace('.md', '')} → ${dest}`)
-    } else {
-      console.log(`○ Команда уже есть: ${dest} (не перезаписываем)`)
-    }
+function syncCursorArtifacts(config) {
+  const totals = syncAllWorkspaceCursorArtifacts(config, REPO_ROOT, { log: true })
+  if (totals.workspaces === 0) {
+    console.log('○ Workspace не задан в config — rule/commands не копировались')
+    return
+  }
+  if (totals.commands === 0 && totals.rules === 0) {
+    console.log('○ Команды и rules уже есть во всех workspace из config')
   }
 }
 
@@ -139,7 +134,7 @@ async function main() {
   }
 
   const config = mergeConfigPreservingUser()
-  syncWorkspaceCommands(config.autoAgent?.workspace)
+  syncCursorArtifacts(config)
 
   run('node', [join(REPO_ROOT, 'scripts', 'sync-extension-version.mjs')], { inherit: true })
 
@@ -151,6 +146,7 @@ async function main() {
   console.log('   1. Chrome → chrome://extensions → ↻ на карточке «VisBug MCP Bridge»')
   console.log('      (кнопка «Обновить» в popup не перезагружает расширение — только ↻ в Chrome)')
   console.log('   2. Cursor → Reload Window')
+  console.log('   3. Если rule visbug-buffer-apply ещё нет в проекте — он скопирован в .cursor/rules/ (или уже был)')
   console.log('\n   Ваш config.json и буфер правок не затронуты.\n')
 }
 

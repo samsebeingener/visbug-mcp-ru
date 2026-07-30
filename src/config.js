@@ -1,5 +1,5 @@
 /**
- * ~/.visbug-mcp/config.json — настройки демона и auto-agent.
+ * ~/.visbug-mcp/config.json — проекты, workspace, repoRoot.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -20,7 +20,7 @@ export const DEFAULT_CONFIG = {
     enabled: false,
     workspace: '',
     useForce: true,
-    /** headless Cursor Agent для остатка — ВЫКЛ по умолчанию (на Windows мигает консоль). */
+    /** Сложные правки передаются через MCP/встроенный Agent без внешних окон. */
     spawnCli: false,
   },
   projects: [],
@@ -28,7 +28,7 @@ export const DEFAULT_CONFIG = {
 }
 
 export function getStoreDir() {
-  return STORE_DIR
+  return process.env.VISBUG_MCP_STORE_DIR || STORE_DIR
 }
 
 export function getConfigPath() {
@@ -68,5 +68,5 @@ export function saveConfig(config) {
 
 export function getPromptPath(config = loadConfig()) {
   const root = config.repoRoot || DEFAULT_REPO_ROOT
-  return join(root, 'prompts', 'visbug-apply.md')
+  return join(root, 'prompts', 'buffer-for-cursor.md')
 }

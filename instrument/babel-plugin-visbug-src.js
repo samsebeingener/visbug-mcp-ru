@@ -16,11 +16,15 @@
  * specific language governing permissions and limitations
  * under the License.
  *
- * visbug-mcp-ru — dev-only JSX instrumentation: inject data-visbug-src
+ * visbug-mcp-ru — dev-only JSX instrumentation: inject data-vb-source
+ * (data-visbug-src и data-vb принимаются как legacy-алиасы)
  * https://github.com/samsebeingener/visbug-mcp-ru
  */
 
 const path = require('path')
+
+const PRIMARY_ATTR = 'data-vb-source'
+const ACCEPTED_ATTRS = ['data-vb-source', 'data-visbug-src', 'data-vb']
 
 /**
  * @param {{ types: import('@babel/core').types }} api
@@ -43,9 +47,13 @@ module.exports = function babelPluginVisbugSrc({ types: t }) {
           && t.isJSXIdentifier(name.property, { name: 'Fragment' })
         ) return
 
+        const attrName = typeof opts.attribute === 'string' && opts.attribute
+          ? opts.attribute
+          : PRIMARY_ATTR
+
         const hasAttr = node.attributes.some(
           (attr) => t.isJSXAttribute(attr)
-            && t.isJSXIdentifier(attr.name, { name: 'data-visbug-src' }),
+            && ACCEPTED_ATTRS.some((name) => t.isJSXIdentifier(attr.name, { name })),
         )
         if (hasAttr) return
 
@@ -60,7 +68,7 @@ module.exports = function babelPluginVisbugSrc({ types: t }) {
 
         node.attributes.push(
           t.jsxAttribute(
-            t.jsxIdentifier('data-visbug-src'),
+            t.jsxIdentifier(attrName),
             t.stringLiteral(value),
           ),
         )

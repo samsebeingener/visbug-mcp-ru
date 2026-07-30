@@ -1,8 +1,8 @@
 {
   "name": "visbug-mcp-ru",
-  "version": "0.10.0",
+  "version": "0.26.0",
   "type": "module",
-  "description": "Self-service VisBug Bridge: localhost проекты, auto-apply и Cursor Agent fallback",
+  "description": "VisBug Bridge (RU): буфер правок VisBug → копирование в Cursor",
   "author": "Nikita Kulikov <https://samsebeingener.ru>",
   "repository": {
     "type": "git",
@@ -17,21 +17,14 @@
     "setup": "node scripts/setup.mjs",
     "setup:quick": "node scripts/setup.mjs --yes",
     "icons": "python scripts/generate-extension-icons.py",
-    "ensure-cli": "node scripts/ensure-agent-cli.mjs",
     "health": "node scripts/health-check.mjs",
     "pretest": "node scripts/sync-extension-version.mjs",
     "test": "node --test test/*.test.js",
     "sync:extension": "node scripts/sync-extension-version.mjs",
-    "update": "node scripts/update.mjs",
-    "postinstall": "node scripts/ensure-agent-cli.mjs || exit 0"
+    "update": "node scripts/update.mjs"
   },
   "dependencies": {
-    "@babel/generator": "^7.28.0",
-    "@babel/parser": "^7.28.0",
-    "@babel/traverse": "^7.28.0",
-    "@babel/types": "^7.28.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "tailwind-merge": "^3.3.0",
     "ws": "^8.18.0"
   }
 }

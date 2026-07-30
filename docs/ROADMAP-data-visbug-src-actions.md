@@ -1,6 +1,17 @@
 # Roadmap: `data-visbug-src` + модель Actions
 
-Версия черновика: 2026-03-28 · базовая линия: **v0.6.36**
+Версия черновика: 2026-03-28 · реализовано: **v0.19.0** (recorder-only)
+
+## Статус v0.19 (Onlook patterns, без auto-apply)
+
+| Волна | Статус | Содержание |
+|-------|--------|------------|
+| P0 v0.17 | ✅ | `visbugSrc`/`stableId` end-to-end, `selector-short.js`, per-file summary |
+| P1 v0.18 | ✅ | `src/actions/schema.js` + `compile.js`, store v4, `actions.json` в буфере |
+| P1 align | ✅ | `align.reference` в layout-delta через alignment-guides |
+| P2 v0.19 | ✅ | `extension/react-source-bridge.js` в manifest, `html-stable-target-contract.md` |
+| P2.1 v0.21 | ✅ | snap-meta + before/after + warnings; Code Connect lite (`src:` + ensureStamped + MO) |
+| P3 | backlog | `ast-apply`, отдельный `get_actions`, auto-apply |
 
 Цель: убрать хрупкость «длинный CSS-селектор → угадывание файла → `sections.css` overlay» и перейти к точному DOM→код, сохранив VisBug + Cursor MCP как основной UX.
 
@@ -195,6 +206,7 @@ v0.6.36 (tag) → v0.7.0 Actions schema + snapshot
              → v0.8.0 data-visbug-src spike (frontend-new)
              → v0.9.0 ast-apply className (React)
              → v0.10.0 static-html Tailwind apply + MCP get_actions/apply_actions
+             → v0.11.0 per-project store + applyHistory patches + undo (popup / revert_apply)
              → v1.0.0 Actions-only buffer, legacy deprecated
 ```
 
@@ -202,6 +214,7 @@ v0.6.36 (tag) → v0.7.0 Actions schema + snapshot
 
 ## Откат
 
+- **v0.11+:** `applyHistory[].patches` — откат по реальным фрагментам файлов (`before`/`after`), не по DOM Actions. Popup «Отменить правку» или MCP `revert_apply`. `clear_changes` / «Очистить правки» **не** откатывают файлы — только очищают буфер actions.
 - Git tag `v0.6.36` — последняя линия до Actions/src
 - `changes.json` v1 остаётся читаемым через мигратор `migrateLegacyChanges()`
 - `instrument: false` в next.config — мгновенный откат атрибутов

@@ -1,0 +1,36 @@
+---
+
+description: >
+
+  Буфер VisBug v0.26: MOVE = x_file(репо) + Δ; write: не копировать вслепую.
+
+  stamps vb-*: при apply перенести id в исходный HTML.
+
+  Контракт projects/visbug-mcp-ru/shared/apply-buffer-contract.md §1.3 и §11.
+
+alwaysApply: false
+
+---
+
+
+
+# VisBug — вставлен буфер правок
+
+
+
+1. **Сначала** `projects/visbug-mcp-ru/shared/apply-buffer-contract.md` (§1.3 закон x_file; §11 auto-stamp; при `src:` — ещё `code-connect-lite-contract.md`)
+
+2. Есть **`src: path:line:col`** — открыть этот файл; не угадывать путь по селектору
+
+3. **MOVE:** прочитать в репо текущий `transform`/`margin` (**x_file**) → записать **`x_file + Δ`** из `from:` / `delta`. Блок `write:` — только предложение из computed; если `before:` ≠ файл, **не** затирать файл значением из `write:`
+
+4. STYLE (цвет и т.п.) — можно из `write:` после взгляда на файл
+
+5. **Stamp pending** (`#vb-*` / секция `stamps:` / warning `stamp-pending`): **обязательно** добавить найденному элементу в исходном HTML атрибут `id="vb-…"` (или `data-visbug-id="vb-…"`), в CSS использовать селектор `#vb-…`. После apply штамп становится постоянным
+
+6. Учесть **`warnings:`**
+
+7. HTML: `<style>` / `*.css` · Next: компонент из `src:` или CSS рядом
+
+8. Ответ кратко на русском
+

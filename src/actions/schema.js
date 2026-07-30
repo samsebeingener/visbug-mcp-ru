@@ -1,89 +1,66 @@
 /**
- * schema.js — типы Actions, target и валидация.
+ * actions/schema.js — typed Actions v1 (Onlook-adjacent, recorder-only).
  */
 
-import { randomUUID } from 'node:crypto'
+export const ACTIONS_SCHEMA_VERSION = 1
 
-export const ACTION_TYPES = {
-  MOVE: 'MOVE',
-  STYLE: 'STYLE',
-  TEXT: 'TEXT',
-  ATTRIBUTE: 'ATTRIBUTE',
-}
+/** v5: write-recipes — одна готовая CSS-правка на узел */
+export const STORE_VERSION = 5
 
-const ACTION_TYPE_SET = new Set(Object.values(ACTION_TYPES))
+/** @typedef {'MOVE' | 'STYLE' | 'TEXT'} ActionType */
 
-export function createActionId() {
-  return randomUUID()
+/**
+ * @typedef {object} ActionTarget
+ * @property {string | null} [visbugSrc]
+ * @property {string | null} [stableSelector]
+ * @property {string | null} [diagnosticSelector]
+ * @property {string | null} [tag]
+ * @property {string | null} [fileHint]
+ */
+
+/**
+ * @typedef {object} StyleChange
+ * @property {string} prop
+ * @property {string | null} old
+ * @property {string | null} new
+ * @property {'set' | 'remove'} op
+ */
+
+const NOISE_STYLE_PROPS = new Set([
+  'cursor',
+  'user-select',
+  'transition',
+  'will-change',
+  'position',
+  'left',
+  'top',
+  'right',
+  'bottom',
+])
+
+/**
+ * @param {string} prop
+ * @param {string | null | undefined} value
+ * @returns {'set' | 'remove'}
+ */
+export function styleOp(prop, value) {
+  if (value == null || value === '' || value === 'undefined' || value === 'null') {
+    return 'remove'
+  }
+  if (NOISE_STYLE_PROPS.has(prop)) return 'remove'
+  return 'set'
 }
 
 /**
- * @param {{ selector?: string, tag?: string, visbugSrc?: string | null, url?: string | null }} input
+ * @param {object} change — normalized store change
+ * @returns {ActionTarget}
  */
-export function normalizeTarget({ selector, tag, visbugSrc, url } = {}) {
-  const target = {
-    selector: String(selector ?? '').trim(),
-    visbugSrc: visbugSrc ?? null,
-    url: url ?? null,
+export function buildActionTarget(change) {
+  return {
+    visbugSrc: change.visbugSrc ?? null,
+    stableSelector: change.shortSelector ?? change.stableId ?? null,
+    diagnosticSelector: change.diagnosticSelector ?? change.selector ?? null,
+    tag: change.tag ?? null,
+    fileHint: change.fileHint ?? null,
   }
-  if (tag) target.tag = String(tag).toLowerCase()
-  return target
-}
-
-/**
- * @param {object} action
- * @returns {{ ok: boolean, errors: string[] }}
- */
-export function validateAction(action) {
-  const errors = []
-
-  if (!action || typeof action !== 'object') {
-    return { ok: false, errors: ['action must be an object'] }
-  }
-
-  if (!action.id) errors.push('missing id')
-  if (!ACTION_TYPE_SET.has(action.type)) errors.push(`invalid type: ${action.type}`)
-  if (!action.target || typeof action.target !== 'object') {
-    errors.push('missing target')
-  } else if (!action.target.selector) {
-    errors.push('missing target.selector')
-  }
-
-  switch (action.type) {
-    case ACTION_TYPES.MOVE:
-      if (!action.delta || typeof action.delta !== 'object') {
-        errors.push('MOVE missing delta')
-      } else {
-        if (action.delta.x == null && action.delta.y == null) {
-          errors.push('MOVE delta must include x and/or y')
-        }
-      }
-      if (action.align && typeof action.align === 'object') {
-        if (action.align.reference && !action.align.reference.selector) {
-          errors.push('MOVE align.reference missing selector')
-        }
-      }
-      break
-    case ACTION_TYPES.STYLE:
-      if (!Array.isArray(action.changes) || action.changes.length === 0) {
-        errors.push('STYLE missing changes')
-      } else {
-        for (const [i, ch] of action.changes.entries()) {
-          if (!ch?.prop) errors.push(`STYLE changes[${i}] missing prop`)
-          if (ch?.value === undefined) errors.push(`STYLE changes[${i}] missing value`)
-        }
-      }
-      break
-    case ACTION_TYPES.TEXT:
-      if (action.newValue === undefined) errors.push('TEXT missing newValue')
-      break
-    case ACTION_TYPES.ATTRIBUTE:
-      if (!action.attribute) errors.push('ATTRIBUTE missing attribute')
-      if (action.newValue === undefined) errors.push('ATTRIBUTE missing newValue')
-      break
-    default:
-      break
-  }
-
-  return { ok: errors.length === 0, errors }
 }

@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import WebSocket from 'ws'
 import { loadConfig, getConfigPath } from '../src/config.js'
-import { getCliHealthForUi } from '../src/cli-resolver.js'
 import { PACKAGE_VERSION } from '../src/version.js'
 import { existsSync, readFileSync } from 'fs'
 import { homedir } from 'os'
@@ -27,7 +26,6 @@ function pingDaemon(timeoutMs = 2500) {
 }
 
 const config = loadConfig()
-const cli = getCliHealthForUi(config)
 const mcpPath = join(homedir(), '.cursor', 'mcp.json')
 let mcpOk = false
 try {
@@ -38,20 +36,20 @@ try {
 } catch {}
 
 const daemonOk = await pingDaemon()
+const workspace = config.autoAgent?.workspace || config.projects?.[0]?.workspace || ''
 
 const lines = [
   'VisBug Bridge — health check',
   `version: ${PACKAGE_VERSION}`,
   `config: ${getConfigPath()}`,
   `daemon ws://127.0.0.1:4844: ${daemonOk ? 'OK' : 'НЕТ (npm run setup или start-ws-daemon.ps1)'}`,
-  `Cursor Agent fallback (${cli.command}): ${cli.ok ? 'OK' : 'НЕТ'}`,
-  `spawnCli: ${config.autoAgent?.spawnCli === true ? 'ВКЛ' : 'ВЫКЛ (без терминалов, только auto-apply)'}`,
   `MCP в Cursor (необязательно): ${mcpOk ? 'OK' : 'НЕТ'}`,
-  `workspace: ${config.autoAgent?.workspace || '(не задан)'}`,
+  `workspace: ${workspace || '(не задан)'}`,
   `repoRoot: ${config.repoRoot || '(не задан)'}`,
+  `режим: recorder-only (буфер → Cursor, без auto-apply)`,
 ]
 
-if (config.autoAgent?.workspace && !existsSync(config.autoAgent.workspace)) {
+if (workspace && !existsSync(workspace)) {
   lines.push('⚠️  workspace не существует на диске')
 }
 

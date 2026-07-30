@@ -2,7 +2,7 @@
  * Snapshot до/после — diff DOM-состояния для режима «Запись».
  */
 
-const SNAPSHOT_MODULE_VERSION = '0.5.4'
+const SNAPSHOT_MODULE_VERSION = '0.6.0'
 
 if (globalThis.VisbugMcpSnapshot?.version !== SNAPSHOT_MODULE_VERSION) {
 
@@ -101,6 +101,74 @@ function readVisbugSrc(el) {
     || null
 }
 
+function readSourceRef(el) {
+  const visbugSrc = el.getAttribute('data-visbug-src')
+  const confidence = el.getAttribute('data-visbug-source-confidence') || 'none'
+  const match = String(visbugSrc ?? '').match(/^(.*?):(\d+):(\d+)$/)
+  if (!match || confidence !== 'exact') {
+    return { v: 1, kind: 'react-debug-source', confidence: 'none' }
+  }
+  return {
+    v: 1,
+    kind: 'react-debug-source',
+    file: match[1],
+    line: Number(match[2]),
+    column: Number(match[3]),
+    origin: 'runtime-dev',
+    confidence: 'exact',
+  }
+}
+
+function readStableId(el) {
+  return el.getAttribute('data-onlook-id')
+    || el.getAttribute('data-visbug-id')
+    || null
+}
+
+function captureRect(el) {
+  const rect = el?.getBoundingClientRect?.()
+  if (!rect) return null
+  return {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  }
+}
+
+function captureParentChain(el, maxDepth = 3) {
+  const chain = []
+  let node = el?.parentElement
+  while (node && chain.length < maxDepth) {
+    const style = globalThis.getComputedStyle?.(node)
+    chain.push({
+      tag: node.tagName?.toLowerCase() ?? '',
+      classes: [...(node.classList ?? [])].slice(0, 12),
+      display: style?.display ?? '',
+      position: style?.position ?? '',
+      gap: style?.gap ?? '',
+    })
+    node = node.parentElement
+  }
+  return chain
+}
+
+function captureDomContext(el) {
+  const style = globalThis.getComputedStyle?.(el)
+  return {
+    rect: captureRect(el),
+    computed: {
+      display: style?.display ?? '',
+      position: style?.position ?? '',
+      marginTop: style?.marginTop ?? '',
+      marginInlineStart: style?.marginInlineStart ?? '',
+      transform: style?.transform ?? '',
+      gap: style?.gap ?? '',
+    },
+    parentChain: captureParentChain(el),
+  }
+}
+
 function captureSnapshot(rootEl, getSelector) {
   if (!rootEl || typeof getSelector !== 'function') return []
 
@@ -118,6 +186,9 @@ function captureSnapshot(rootEl, getSelector) {
       className: el.getAttribute('class') ?? '',
       text: captureElementText(el),
       visbugSrc: readVisbugSrc(el),
+      sourceRef: readSourceRef(el),
+      stableId: readStableId(el),
+      domContext: captureDomContext(el),
     })
   }
 
@@ -185,6 +256,15 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
         newValue,
         tag: after.tag,
         visbugSrc: after.visbugSrc ?? null,
+        sourceRef: after.sourceRef,
+        userTarget: {
+          selector: after.selector,
+          tag: after.tag,
+          label: `${after.tag}${after.className ? ` · ${after.className.split(/\s+/).slice(0, 2).join(' ')}` : ''}`,
+          rect: after.domContext?.rect ?? null,
+          stableId: after.stableId ?? null,
+        },
+        domContext: after.domContext ?? null,
         url,
         timestamp,
         applied: false,
@@ -200,6 +280,15 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
         newValue: after.className,
         tag: after.tag,
         visbugSrc: after.visbugSrc ?? null,
+        sourceRef: after.sourceRef,
+        userTarget: {
+          selector: after.selector,
+          tag: after.tag,
+          label: `${after.tag}${after.className ? ` · ${after.className.split(/\s+/).slice(0, 2).join(' ')}` : ''}`,
+          rect: after.domContext?.rect ?? null,
+          stableId: after.stableId ?? null,
+        },
+        domContext: after.domContext ?? null,
         url,
         timestamp,
         applied: false,
@@ -217,6 +306,15 @@ function diffSnapshots(beforeEntries, afterEntries, { url, timestamp = Date.now(
           newValue,
           tag: after.tag,
           visbugSrc: after.visbugSrc ?? null,
+          sourceRef: after.sourceRef,
+          userTarget: {
+            selector: after.selector,
+            tag: after.tag,
+            label: `${after.tag}${after.className ? ` · ${after.className.split(/\s+/).slice(0, 2).join(' ')}` : ''}`,
+            rect: after.domContext?.rect ?? null,
+            stableId: after.stableId ?? null,
+          },
+          domContext: after.domContext ?? null,
           url,
           timestamp,
           applied: false,
@@ -254,6 +352,9 @@ globalThis.VisbugMcpSnapshot = {
   normalizeText,
   findTextOwnerElement,
   readVisbugSrc,
+  readSourceRef,
+  readStableId,
+  captureDomContext,
   getDefaultSnapshotRoot,
   TEXT_ELEMENT_TAGS,
 }

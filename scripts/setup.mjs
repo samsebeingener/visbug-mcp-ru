@@ -12,9 +12,9 @@ import { homedir, platform } from 'os'
 import { join, dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { saveConfig, loadConfig } from '../src/config.js'
-import { ensureAgentCli } from './ensure-agent-cli.mjs'
 import { normalizeOrigin } from '../src/projects.js'
 import { describeProjectInstrumentation, enrichProjectRegistration } from '../src/wire-project.js'
+import { syncWorkspaceCursorArtifacts } from './sync-cursor-artifacts.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '..')
@@ -88,7 +88,6 @@ async function main() {
   console.log(`Репозиторий: ${REPO_ROOT}\n`)
 
   let workspace = args.workspace
-  let enableAuto = args.yes
   let origin = args.origin
   let projectName = args.name
 
@@ -96,7 +95,7 @@ async function main() {
     const rl = createInterface({ input: process.stdin, output: process.stdout })
     const workspaceRaw = await ask(
       rl,
-      'Путь к проекту сайта (workspace для auto-agent после «Стоп», Enter = пропустить): ',
+      'Путь к проекту сайта (workspace, Enter = пропустить): ',
     )
     workspace = workspaceRaw.trim() ? resolve(workspaceRaw.trim()) : workspace
     if (workspace) {
@@ -108,12 +107,6 @@ async function main() {
       const nameRaw = await ask(rl, 'Название проекта для popup (Enter = имя папки): ')
       projectName = nameRaw.trim()
     }
-
-    const autoAnswer = await ask(
-      rl,
-      'Включить auto-agent после «Стоп»? (Y/n) — правки применятся сами, без команд в чате: ',
-    )
-    enableAuto = !/^n|no|нет$/i.test(autoAnswer.trim())
     rl.close()
   } else if (!workspace) {
     workspace = process.env.VISBUG_WORKSPACE ? resolve(process.env.VISBUG_WORKSPACE) : ''
@@ -146,9 +139,7 @@ async function main() {
     version: 2,
     repoRoot: REPO_ROOT,
     autoAgent: {
-      enabled: workspace
-        ? enableAuto && Boolean(origin)
-        : Boolean(previous.autoAgent?.enabled),
+      enabled: false,
       workspace: workspace || previous.autoAgent?.workspace || '',
       useForce: true,
       spawnCli: false,
@@ -162,46 +153,18 @@ async function main() {
   startDaemon()
 
   if (workspace) {
-    const cmdDir = join(workspace, '.cursor', 'commands')
-    mkdirSync(cmdDir, { recursive: true })
-    for (const name of ['visbug-mcp-update.md', 'visbug-mcp-start.md', 'visbug-apply.md']) {
-      const src = join(REPO_ROOT, '.cursor', 'commands', name)
-      const dest = join(cmdDir, name)
-      if (existsSync(src) && !existsSync(dest)) {
-        copyFileSync(src, dest)
-      }
-    }
+    syncWorkspaceCursorArtifacts(workspace, REPO_ROOT, { log: true })
   }
 
-  console.log('\n--- Cursor Agent CLI (для «Стоп» без команд) ---\n')
-  const cli = await ensureAgentCli({ install: true, quiet: false })
-  if (!cli.ok) {
-    console.log('⚠️  CLI не установился. Повторите: npm run ensure-cli\n')
-  } else if (!cli.installed) {
-    console.log('✅ CLI уже был на месте\n')
+  console.log('\n--- Готово ---\n')
+  console.log('Цикл: VisBug на localhost → popup «Скопировать правки» → вставить в Cursor → patch в коде.')
+  console.log('Rule visbug-buffer-apply.mdc копируется в .cursor/rules/ проекта (если ещё нет).\n')
+  if (config.projects?.length) {
+    const p = config.projects[config.projects.length - 1]
+    console.log(`Проект: ${p.name}`)
+    console.log(`Workspace: ${p.workspace}`)
+    console.log(`Origin: ${(p.origins || []).join(', ') || 'не задан'}\n`)
   }
-
-  console.log('--- Осталось вручную (один раз) ---\n')
-  const extensionDir = join(REPO_ROOT, 'extension')
-  console.log('1. VisBug — установить из Chrome Web Store:')
-  console.log('   https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc\n')
-  console.log('2. Расширение visbug-mcp — в адресной строке Chrome откройте:')
-  console.log('   chrome://extensions')
-  console.log('   Режим разработчика → «Загрузить распакованное» → выберите папку:')
-  console.log(`   ${extensionDir}\n`)
-  console.log('   (скопируйте путь выше — не ищите по диску)\n')
-  console.log('3. Cursor → Reload Window\n')
-
-  if (config.autoAgent.enabled) {
-    console.log(`Auto-apply: ВКЛ → ${workspace}`)
-    console.log(`Origin: ${origin || 'не задан — добавьте через npm run setup'}`)
-    console.log('Цикл: Запись → auto-apply → Cursor Agent для сложного остатка.')
-    console.log('Лог: ~/.visbug-mcp/agent-runs.log\n')
-  } else {
-    console.log('Auto-agent: ВЫКЛ. Запустите npm run setup с путём к проекту.\n')
-  }
-
-  console.log('Готово.\n')
 }
 
 main().catch((err) => {

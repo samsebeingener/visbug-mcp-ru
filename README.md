@@ -5,14 +5,29 @@
 <h1 align="center">VisBug MCP Bridge</h1>
 
 <p align="center">
-  Мост <strong>VisBug → Cursor</strong> через MCP: визуальные правки на <code>localhost</code> → Actions v2 → auto-apply в исходники (React AST или Tailwind на static HTML).
+  Мост <strong>VisBug → Cursor</strong>: визуальные правки на <code>localhost</code> → буфер → вставка в чат → patch в исходниках агентом Cursor.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/локаль-only-зелёный?style=flat-square" alt="только локально">
-  <img src="https://img.shields.io/badge/MCP-Cursor-blue?style=flat-square" alt="MCP Cursor">
+  <img src="https://img.shields.io/badge/v0.19-onlook--patterns-зелёный?style=flat-square" alt="onlook-patterns">
+  <img src="https://img.shields.io/badge/локально-only-зелёный?style=flat-square" alt="только локально">
+  <img src="https://img.shields.io/badge/MCP-опционально-blue?style=flat-square" alt="MCP опционально">
   <img src="https://img.shields.io/badge/язык-русский-red?style=flat-square" alt="русский">
 </p>
+
+---
+
+## Что это
+
+**Recorder-only** (модель [mambari/visbug-mcp](https://github.com/mambari/visbug-mcp)): расширение **не пишет** в файлы проекта. VisBug меняет DOM на странице → bridge сохраняет сырые мутации → вы копируете буфер → Cursor вносит правки в код по контракту.
+
+| Было (до v0.13) | Сейчас (v0.19) |
+|-----------------|----------------|
+| auto-apply, Actions v2, undo | Удалено (recorder-only) |
+| «Начать запись» / «Стоп» | Не нужно — live-захват при drag |
+| Только inline `top`/`left` | + **`layout-delta`** + **`visbugSrc`** / **`src:`** + per-file summary |
+| Длинный селектор | Короткий селектор + write-recipes v0.26 (`before`/`after`/`snap`) + auto-stamp `vb-*` |
+| `/visbug-apply` | Не нужно — вставка буфера в чат |
 
 ---
 
@@ -22,21 +37,20 @@
 Chrome (VisBug + расширение)
         │  WebSocket ws://127.0.0.1:4844
         ▼
-┌─────────────────┐      ~/.visbug-mcp/changes.json
+┌─────────────────┐      ~/.visbug-mcp/projects/<id>/changes.json
 │  ws-daemon.js   │ ◄──────────────────────────────►  src/server.js (MCP stdio)
-│  (pm2 / фон)    │                                    └─ запускается Cursor
-│                 │                                       по запросу
+│  (фон)          │                                    └─ опционально в Cursor
 └─────────────────┘
 ```
 
-- **`src/ws-daemon.js`** — автономный WebSocket-сервер. Работает в фоне (pm2 или PowerShell-скрипт). Принимает мутации от расширения и сохраняет их в `~/.visbug-mcp/changes.json`.
-- **`src/server.js`** — MCP-сервер (stdio). Запускается Cursor по запросу. Читает и пишет общий файл store. WebSocket не открывает.
-- **`extension/`** — расширение Chrome. Content-script на `localhost` наблюдает за DOM; popup показывает статус и кнопки управления.
+- **`src/ws-daemon.js`** — WebSocket на `127.0.0.1:4844`. Принимает live-мутации от content-script, дедуплирует, пишет в per-project store.
+- **`src/server.js`** — MCP (stdio): `get_changes` / `apply_changes` / `clear_changes`. Запись в файлы **не выполняет**.
+- **`extension/`** — Chrome MV3: observer на `localhost`, popup «Скопировать» / «Очистить», красные направляющие с px.
 
 ### Безопасность
 
-- WebSocket только `ws://127.0.0.1:4844` — данные не уходят в интернет
-- Хранилище только `~/.visbug-mcp/changes.json` на вашем компьютере
+- WebSocket только `127.0.0.1` — данные не уходят в интернет
+- Store: `~/.visbug-mcp/projects/<projectId>/changes.json` на вашем ПК
 - Внешних HTTP-запросов нет
 
 ---
@@ -44,7 +58,7 @@ Chrome (VisBug + расширение)
 ## Установка
 
 **Полная инструкция:** [docs/INSTALL.ru.md](docs/INSTALL.ru.md)  
-**В Cursor:** команда `/visbug-mcp-start` (файл `.cursor/commands/visbug-mcp-start.md`).
+**В Cursor:** `/visbug-mcp-start`
 
 ```bash
 git clone https://github.com/samsebeingener/visbug-mcp-ru.git
@@ -53,250 +67,147 @@ npm install
 npm run setup
 ```
 
-`npm run setup` — добавляет проект и его `localhost` origin, запускает Bridge daemon и настраивает **auto-apply** после «Стоп». MCP в Cursor создаётся для ручного доступа, но запись от него не зависит.
+`npm run setup` регистрирует workspace + `localhost` origin, запускает daemon и копирует в проект:
 
-**Cursor Agent CLI** (опционально, для сложных правок): `npm run ensure-cli` → `agent login`. На Windows ставится в `%LOCALAPPDATA%\cursor-agent\agent.cmd`.
+- команды `/visbug-mcp-start`, `/visbug-mcp-update`;
+- rule **`.cursor/rules/visbug-buffer-apply.mdc`** — подсказка агенту при вставке буфера.
 
-### 1. Зависимости (ручной путь)
+### Расширения Chrome
 
-```bash
-git clone https://github.com/samsebeingener/visbug-mcp-ru.git
-cd visbug-mcp-ru
-npm install
-```
+1. [VisBug](https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc) (официальный)
+2. **visbug-mcp** — `chrome://extensions` → режим разработчика → **Загрузить распакованное** → папка `extension/` в клоне репо
 
-### 2. WebSocket-демон
+### Демон (если setup не запустил)
 
-**Windows (PowerShell):**
+**Windows:**
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/start-ws-daemon.ps1
 ```
 
-**macOS / Linux (pm2):**
+**macOS / Linux:**
 
 ```bash
-npm install -g pm2
-pm2 start src/ws-daemon.js --name visbug-ws
-pm2 startup
-pm2 save
+npm run daemon
+# или pm2 start src/ws-daemon.js --name visbug-ws
 ```
 
-Демон слушает `ws://127.0.0.1:4844` и перезапускается при сбое.
+### MCP в Cursor (опционально)
 
-### 3. Расширения Chrome
+`npm run setup` добавляет запись в `~/.cursor/mcp.json`. Для записи VisBug MCP **не обязателен** — достаточно popup «Скопировать».
 
-**VisBug (официальный):**  
-https://chromewebstore.google.com/detail/visbug/cdockenadnadldjbbgcallicgledbeoc
+После правок — **Reload Window** в Cursor.
 
-**visbug-mcp (наше):**
+### Обновление
 
-1. В адресной строке Chrome откройте: `chrome://extensions`
-2. Включите **режим разработчика** (переключатель справа вверху)
-3. **«Загрузить распакованное расширение»**
-4. Выберите папку **`extension/`** внутри клона репозитория
-
-Полный путь печатает `npm run setup`, пример:
-
-```
-C:\Users\you\projects\visbug-mcp-ru\extension
+```bash
+npm run update
 ```
 
-Не ищите папку по всему диску — скопируйте путь из терминала после setup или из popup visbug-mcp.
-
-### 4. MCP в Cursor
-
-Добавьте в `~/.cursor/mcp.json`:
-
-```json
-"visbug-mcp": {
-  "command": "node",
-  "args": ["C:/путь/к/visbug-mcp-ru/src/server.js"]
-}
-```
-
-После правок `mcp.json` — **Reload Window** в Cursor.
+`git pull`, `npm install`, перезапуск daemon, копирование недостающих команд и rule во все workspace из config (без перезаписи существующих).
 
 ---
 
 ## Как пользоваться
 
-### Режим «Запись» (v0.6.2+)
+### Рабочий цикл (v0.13)
 
-1. Запустите сайт и откройте `http://localhost:…` в Chrome.
-2. В Cursor запустите `/visbug-mcp-start`: команда спросит, использовать уже запущенный localhost-проект или поднять новый.
-3. Popup на нужной localhost-странице покажет статус **Bridge daemon готов**, выбранный проект и auto-apply → **Начать запись**.
-4. Правки в VisBug (стили, текст, layout).
-5. **Стоп — завершить запись**.
+1. Запустите сайт на `http://localhost:…`, откройте в Chrome.
+2. Убедитесь, что origin зарегистрирован (`/visbug-mcp-start` или `npm run setup`).
+3. Popup: зелёная точка = daemon online.
+4. Правьте layout в **VisBug** (красные направляющие с px — в расширении).
+5. Popup → **«Скопировать правки»** → вставьте в чат Cursor.
+6. Агент правит исходники (см. [apply-buffer-contract](shared/apply-buffer-contract.md)).
+7. Popup → **«Очистить правки»** (опционально).
 
-**После «Стоп» команды в чате не нужны:**
+Отдельная команда для apply **не нужна**.
 
-1. **auto-apply** — Bridge сам пишет безопасные правки в исходники: CSS и текст в `src/` для приложений; CSS в `<style>` и уникальный видимый текст в корневой `index.html` для статичных лендингов.
-2. **Cursor Agent fallback** — если остаётся сложная правка, Bridge скрытно запускает Cursor Agent CLI. Агент читает локальный run-packet и подтверждает только реально применённые изменения.
-3. **MCP** — необязательный ручной доступ из Cursor к буферу правок; не нужен для записи и fallback.
+### Как Cursor понимает буфер
 
-Логи: `~/.visbug-mcp/auto-apply.log`, `~/.visbug-mcp/agent-runs.log`
+| Слой | Где |
+|------|-----|
+| Футер в буфере | Добавляется при «Скопировать» (путь к контракту) |
+| Rule | `<workspace>/.cursor/rules/visbug-buffer-apply.mdc` (из `setup` / `update`) |
+| Контракт | [`shared/apply-buffer-contract.md`](shared/apply-buffer-contract.md) |
 
-**Важно:** жмите **Стоп** до закрытия VisBug.
-
-### Статичные HTML-лендинги
-
-Для проектов с корневым `index.html` auto-apply включается автоматически: стили сохраняются в существующий блок `<style>`, а уникальный текст — прямо в `index.html`. Запустите лендинг через localhost, затем зарегистрируйте папку и origin командой `/visbug-mcp-start`. Если один и тот же текст повторяется несколько раз или CSS-правка требует изменения классов Tailwind, её обработает Cursor Agent fallback.
+Кратко для агента: контейнер vs ребёнок, фильтр шума VisBug, **bake** `left`/`top`/`transform`, не копировать `left` 1:1 в `transform`.
 
 ### Несколько проектов
 
-Bridge сопоставляет точный origin с папкой проекта. Например: `http://localhost:3001` → Next-проект, `http://localhost:3002` → статичный лендинг. В popup всегда видны выбранные папка и тип исходников; если origin не зарегистрирован, запись блокируется вместо риска записать правки в другой проект.
+Bridge сопоставляет **точный origin** с workspace. Пример: `localhost:3001` → Next, `localhost:3002` → static HTML. Незарегистрированный origin — запись блокируется.
 
-### Запасной путь (ручной)
-
-- **Скопировать правки** в popup или MCP `get_changes` → `apply_changes` в Cursor
-- Команда `/visbug-apply` в проекте с `.cursor/commands/` (если auto-apply не добил всё)
-
-**Цикл записи:** «Начать запись» (буфер очищается) → правки в VisBug → «Стоп» → snapshot diff → auto-apply в файлы.
-
-### Popup Chrome
+### Popup
 
 | Индикатор | Значение |
-|---|---|
-| 🟢 Bridge daemon готов | Можно начать запись |
-| 🔴 Bridge daemon не запущен | Перезапустите `start-ws-daemon.ps1` |
-| ✓ Запись в файлы после Стоп | auto-apply включён, workspace задан |
-| ○ CLI agent — не нужен | Норма: CSS уже пишется без CLI |
-| ✓ CLI agent (доп.) | Fallback LLM для сложных правок |
-| `N правок в буфере` | Неприменённых изменений |
+|-----------|----------|
+| 🟢 Bridge подключён | Можно править в VisBug |
+| 🔴 Daemon не запущен | `start-ws-daemon.ps1` или `npm run daemon` |
+| `N правок в буфере` | Накопленные мутации |
 
 | Кнопка | Действие |
-|---|---|
-| **Скопировать правки** | Копирует форматированный список в буфер обмена |
-| **Очистить правки** | Сбрасывает store и storage VisBug |
+|--------|----------|
+| **Скопировать правки** | Буфер + футер для Cursor |
+| **Очистить правки** | Сброс store текущего проекта |
 
-### MCP-инструменты (v0.10+)
+### MCP-инструменты (опционально)
 
 | Инструмент | Назначение |
-|---|---|
-| **`get_actions`** | JSON: pending MOVE/STYLE/TEXT, workspace, summary |
-| **`apply_actions`** | Запись в файлы через auto-apply (`actionIds` / indices) |
-| `get_changes` | [legacy] текстовый summary |
-| `apply_changes` | [legacy] только пометка в буфере |
-| `clear_changes` | Очистка store |
+|------------|------------|
+| `get_changes` | Текст буфера (как в popup) |
+| `apply_changes` | Пометить индексы как применённые **в store** (после ручного patch в коде) |
+| `clear_changes` | Очистить буфер |
 
-#### `get_actions` / `apply_actions`
-
-Предпочтительный путь после «Стоп», если в буфере остались правки или нужен ручной apply из Cursor:
+Пример строки в буфере:
 
 ```
-get_actions → apply_actions
+[0] section.hero-section … > h1… → стиль: left = -163px (было: не задано)
 ```
-
-`apply_actions` без `markOnly` вызывает тот же `auto-apply.js`, что и демон после записи.
-
-#### `get_changes` (legacy)
-
-Возвращает захваченные визуальные правки (ещё не применённые).
-
-```
-Параметры:
-  filter  (опционально): "style" | "attribute" | "text" | "node-added" | "node-removed"
-```
-
-Пример вывода:
-
-```
-[0] .card > h2 → стиль: font-size = 18px (было: 16px)
-[1] .btn--primary → стиль: background = rgb(59, 130, 246) (было: rgb(99, 102, 241))
-[2] #hero-title → текст: «Новый заголовок» (было: «Старый заголовок»)
-```
-
-#### `apply_changes`
-
-Помечает правки как применённые **в буфере** (после того как вы или auto-apply уже записали их в исходники).
-
-```
-Параметры:
-  ids  (опционально): массив индексов — пусто = пометить все непомеченные
-```
-
-#### `clear_changes`
-
-Полностью очищает буфер.
 
 ---
 
 ## Техническое поведение
 
-### Режим «Запись» (snapshot, v0.2+)
+### Live-захват + layout-delta (v0.14)
 
-Live-мутации **выключены намеренно** — иначе VisBug при перезагрузке страницы снова накатывает старые правки и засоряет буфер.
+Content-script пишет inline-мутации VisBug. При **отпускании** drag дополнительно:
 
-1. «Начать запись» — очистка буфера + снимок DOM «до» (вся страница / `main`)
-2. Правки в VisBug
-3. «Стоп» — снимок «после», diff → `changes.json`
-4. `auto-apply.js` пишет простые CSS/текст в workspace
-5. Сложный остаток — Cursor Agent CLI скрытно обрабатывает run-packet и подтверждает применённые файлы
+```text
+[#method-quote] → смещение: Δx=0px Δy=-65px (viewport 1440×900)
+```
 
-### Дедупликация
+Δ — разница `getBoundingClientRect()` до/после drag; не зависит от того, писал ли VisBug только `top` без `left`. Агент: [`apply-buffer-contract.md`](shared/apply-buffer-contract.md).
 
-Парсер (`src/parser.js`) хранит `Map` (`seen`) по ключу `selector|type|свойство`. Если одно свойство менялось несколько раз — сохраняется только последнее значение.
+### Auto-stamp (v0.26)
 
-### Персистентность (file store)
+Если у элемента, получившего записанную мутацию, нет ни `id`, ни `data-vb*`, content-script сам ставит ему `data-visbug-id="vb-<tag>-<NN>"` (например `vb-div-01`) — атрибут вне фильтра обсервера, петли нет. В буфере появляется секция `stamps:` (`vb-div-01 → исходный DOM-path`), рецепт идёт на стабильный `#vb-div-01` с confidence high и warning `stamp-pending`. При первом apply агент **обязан** перенести этот id в исходный HTML (и использовать `#vb-*` в CSS) — с этого момента цель стабильна навсегда, без ручной разметки. Подробности: §11 [`apply-buffer-contract.md`](shared/apply-buffer-contract.md).
 
-Правки пишутся в `~/.visbug-mcp/changes.json` после «Стоп» (snapshot diff). Это **общий источник правды** между демоном и MCP-сервером.
+### Store (v2)
+
+`~/.visbug-mcp/projects/<projectId>/changes.json`:
 
 ```json
 {
-  "changes": [
-    {
-      "type": "style",
-      "selector": ".card > h2",
-      "property": "font-size",
-      "oldValue": "16px",
-      "newValue": "18px",
-      "tag": "H2",
-      "url": "http://localhost:3001/",
-      "timestamp": 1711234567890,
-      "applied": false
-    }
-  ]
+  "version": 2,
+  "workspace": "/abs/path/to/site",
+  "changes": [ … ]
 }
 ```
 
-### Фильтрация шума
+### Парсер и шум
 
-Парсер автоматически игнорирует:
-
-- внутренние селекторы VisBug (`#vibe-annotations-root`, `vis-bug` и т.д.)
-- scoped CSS-переменные Vue (`--dc13a441-…`)
-- классы Vue Router (`router-link-active`, transitions)
-- мутации `node-added` / `node-removed` (рендер Vue)
-- длинные начальные тексты (дамп первого рендера)
-- атрибуты `contenteditable` (внутреннее использование VisBug)
+`src/parser.js` — дедуп по `selector|type|property`, фильтр overlay `#visbug-mcp-guides-root` и UI VisBug. Сырые `left`/`top`/`transform` **не переводятся** автоматически — bake делает агент по контракту.
 
 ---
 
 ## Полезные команды
 
 ```bash
-# Проверка установки
-npm run health
-
-# Cursor Agent CLI (fallback LLM)
-npm run ensure-cli
-agent login
-
-# Статус демона (pm2)
-pm2 status visbug-ws
-
-# Логи в реальном времени
-pm2 logs visbug-ws
-
-# Перезапуск
-pm2 restart visbug-ws
-
-# Разработка с автоперезагрузкой
-npm run daemon:watch
-
-# Очистить store вручную
-echo '{"changes":[]}' > ~/.visbug-mcp/changes.json
+npm run health          # daemon, extension version, config
+npm run setup           # первичная настройка + rule в workspace
+npm run update          # git pull + sync commands/rule
+npm run daemon          # foreground daemon
+npm run daemon:watch    # разработка с --watch
+npm test                # unit-тесты
 ```
 
 ---
@@ -305,51 +216,56 @@ echo '{"changes":[]}' > ~/.visbug-mcp/changes.json
 
 ```
 visbug-mcp-ru/
-├── assets/
-│   ├── cover-banner.png     # обложка README
-│   └── social-preview.jpg   # превью при шаринге (копия баннера)
 ├── src/
-│   ├── ws-daemon.js         # WebSocket-демон (фон)
-│   ├── server.js            # MCP stdio (Cursor)
-│   ├── auto-apply.js        # запись правок в файлы без LLM
-│   ├── auto-agent.js        # fallback: headless agent после auto-apply
-│   ├── cli-resolver.js      # поиск agent / agent.cmd (Windows)
-│   └── parser.js            # парсинг, дедупликация, формат
-├── extension/
-│   ├── manifest.json        # Chrome Manifest v3
-│   ├── content-script.js    # DOM + WebSocket-клиент
-│   ├── popup.html           # интерфейс popup (RU)
-│   ├── popup.js
-│   └── background.js
+│   ├── ws-daemon.js           # WebSocket, буфер
+│   ├── server.js              # MCP stdio
+│   ├── parser.js              # мутации → changes, формат буфера
+│   ├── project-store.js       # per-project store v2
+│   └── config.js
+├── extension/                 # Chrome: content-script, popup, guides
+├── shared/
+│   └── apply-buffer-contract.md   # контракт для Cursor-агента
+├── prompts/
+│   └── buffer-for-cursor.md
+├── .cursor/
+│   ├── commands/              # visbug-mcp-start, visbug-mcp-update
+│   └── rules/                 # visbug-buffer-apply.mdc → копируется в workspace
 ├── scripts/
-│   ├── setup.mjs            # npm run setup
-│   ├── ensure-agent-cli.mjs # npm run ensure-cli
-│   ├── health-check.mjs     # npm run health
-│   └── start-ws-daemon.ps1  # демон на Windows
-├── README.md                # этот файл
-├── README.ru.md             # краткая версия
-└── FORK.ru.md               # заметки о форке
+│   ├── setup.mjs
+│   ├── update.mjs
+│   ├── sync-cursor-artifacts.mjs
+│   └── start-ws-daemon.ps1
+├── docs/
+│   ├── INSTALL.ru.md
+│   └── archive/               # старые спеки auto-apply (не актуальны)
+└── test/
 ```
 
 ---
 
-## Что переведено на русский
+## Roadmap / архив
 
-- Popup расширения Chrome
-- Описания MCP-инструментов и ответы сервера
-- Формат строк в `get_changes` и буфере обмена («было», «текст», «CSS»)
+Идеи auto-apply, layout-solver, `data-visbug-src` — в [`docs/archive/`](docs/archive/) и [ROADMAP](docs/ROADMAP-data-visbug-src-actions.md). В v0.13 **не реализованы**.
+
+---
+
+## Что на русском
+
+- Popup расширения
+- Строки буфера («стиль», «было», «текст»)
+- Описания MCP-инструментов
 
 ---
 
 ## Лицензия и upstream
 
-Самостоятельная разработка на базе идей [mambari/visbug-mcp](https://github.com/mambari/visbug-mcp) (ранний upstream). VisBug — [GoogleChromeLabs/ProjectVisBug](https://github.com/GoogleChromeLabs/ProjectVisBug).
-
-Архитектурные референсы (идеи, не копипаст кода): [Onlook](https://github.com/onlook-dev/onlook) (`data-visbug-src`, Actions, AST apply) — см. [ROADMAP](docs/ROADMAP-data-visbug-src-actions.md).
+Разработка [Никита Куликов](https://samsebeingener.ru) на базе идей [mambari/visbug-mcp](https://github.com/mambari/visbug-mcp).  
+VisBug — [GoogleChromeLabs/ProjectVisBug](https://github.com/GoogleChromeLabs/ProjectVisBug).
 
 ---
 
 <p align="center">
   <strong>Никита Куликов</strong><br>
-  <a href="https://samsebeingener.ru">samsebeingener.ru</a>
+  <a href="https://samsebeingener.ru">samsebeingener.ru</a> ·
+  <a href="https://github.com/samsebeingener/visbug-mcp-ru">GitHub</a>
 </p>

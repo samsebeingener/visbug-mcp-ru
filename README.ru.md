@@ -2,7 +2,13 @@
 
 Полное описание — в [README.md](./README.md).
 
-Мост **VisBug → Cursor**: запись на `localhost`, Actions v2, auto-apply в React/static HTML.
+Мост **VisBug → Cursor**: запись на `localhost`, буфер правок → ручное применение в чате (**recorder-only**, v0.13+).
+
+## Применение буфера в Cursor
+
+1. Popup → **«Скопировать правки»** → вставить в чат Cursor (отдельная команда не нужна).
+2. В конце буфера — подсказка агенту; rule `visbug-buffer-apply.mdc` в `.cursor/rules/` (ставится `npm run setup` / `npm run update`).
+3. Полный контракт: [`shared/apply-buffer-contract.md`](./shared/apply-buffer-contract.md).
 
 ## Быстрый старт
 
@@ -14,7 +20,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start-ws-daemon.ps1
 
 Chrome → `chrome://extensions` → **Загрузить распакованное** → папка `extension/`.
 
-Cursor → Reload Window (MCP: `get_actions`, `apply_actions`).
+**v0.14:** recorder-only + `layout-delta` в буфере при отпускании drag.
 
 ---
 

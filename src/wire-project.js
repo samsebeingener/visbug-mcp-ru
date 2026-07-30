@@ -4,7 +4,16 @@
 
 import { existsSync } from 'fs'
 import { join } from 'path'
-import { detectWorkspaceLayout } from './auto-apply.js'
+
+/**
+ * @param {string} workspace
+ */
+export function detectWorkspaceLayout(workspace) {
+  if (!workspace || !existsSync(workspace)) return 'unknown'
+  if (existsSync(join(workspace, 'package.json'))) return 'framework-src'
+  if (existsSync(join(workspace, 'index.html'))) return 'static-html'
+  return 'unknown'
+}
 
 /**
  * @param {string} workspace
@@ -28,11 +37,9 @@ export function describeProjectInstrumentation(workspace) {
 
     return {
       layout: hasNext ? 'nextjs' : 'react',
-      instrumentation: 'extension-runtime',
+      instrumentation: 'selector',
       siteChangesRequired: false,
-      userMessage:
-        'Next/React: расширение само проставит data-visbug-src в dev (npm run dev). '
-        + 'Правки в next.config и Babel не нужны.',
+      userMessage: 'React/Next: правки вносятся вручную в Cursor по буферу VisBug.',
     }
   }
 
@@ -41,7 +48,7 @@ export function describeProjectInstrumentation(workspace) {
       layout: 'static-html',
       instrumentation: 'selector',
       siteChangesRequired: false,
-      userMessage: 'Static HTML: правки пишутся в index.html / <style> по селектору.',
+      userMessage: 'Static HTML: правки в index.html / <style> по селектору из буфера.',
     }
   }
 
