@@ -16,7 +16,8 @@ test('parseTransformTranslate reads matrix translate', () => {
 
 test('suggestLever picks transform for flex center', () => {
   assert.equal(suggestLever({ display: 'flex', justifyContent: 'center' }), 'transform')
-  assert.equal(suggestLever({ display: 'block' }), 'margin')
+  // визуальный сдвиг не должен толкать соседей: block тоже transform
+  assert.equal(suggestLever({ display: 'block' }), 'transform')
 })
 
 test('formatApplyRecipe is x + Δ = итог', () => {

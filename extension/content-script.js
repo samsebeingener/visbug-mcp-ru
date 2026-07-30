@@ -21,6 +21,16 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
   let socket = null
   let connected = false
   let guidesArmed = false
+  let flushTimer = null
+
+  /** Дебаунс-flush: клавиатурные сдвиги (стрелки VisBug) не дают pointerup. */
+  function scheduleFlush() {
+    if (flushTimer) clearTimeout(flushTimer)
+    flushTimer = setTimeout(() => {
+      flushTimer = null
+      flushDragSessions()
+    }, 600)
+  }
 
   function armGuides() {
     if (guidesArmed) return
@@ -69,7 +79,7 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
       connected = true
       armGuides()
       socket.send(JSON.stringify({ event: 'popup-start-editing', url: location.href }))
-      console.debug('[visbug-mcp] connected, guides armed (visible on drag only)')
+      console.log('[visbug-mcp] connected, guides armed')
     })
 
     socket.addEventListener('message', (e) => {
@@ -315,6 +325,7 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
   function beginDragSession(el, selector) {
     if (!el || el.nodeType !== Node.ELEMENT_NODE || isBridgeOverlayNode(el)) return
     if (dragSessions.has(selector)) return
+    console.log('[visbug-mcp] drag-session begin', selector)
     const rect = el.getBoundingClientRect()
     const lib = lever()
     const offsetBefore = lib?.readOffsetFromComputedStyle
@@ -335,7 +346,12 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
   }
 
   function flushDragSessions() {
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
     if (dragSessions.size === 0 || commitScheduled) return
+    console.log('[visbug-mcp] flush start, sessions ×' + dragSessions.size)
     commitScheduled = true
     const sessions = [...dragSessions.values()]
     dragSessions.clear()
@@ -353,12 +369,15 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
         const deltaY = roundPx(rectAfter.top - rectBefore.top)
         const deltaW = roundPx(rectAfter.width - rectBefore.width)
         const deltaH = roundPx(rectAfter.height - rectBefore.height)
-        if (deltaX === 0 && deltaY === 0 && deltaW === 0 && deltaH === 0) continue
+        if (deltaX === 0 && deltaY === 0 && deltaW === 0 && deltaH === 0) {
+          console.log('[visbug-mcp] flush skip (delta 0)', selector)
+          continue
+        }
         const moved = deltaX !== 0 || deltaY !== 0
         const resized = deltaW !== 0 || deltaH !== 0
         const editIntent = moved ? (resized ? 'move+resize' : 'move') : 'resize'
         if (isSuspiciousLayoutDelta(deltaX, deltaY, viewport)) {
-          console.debug('[visbug-mcp] skip suspicious layout-delta', selector, deltaX, deltaY)
+          console.log('[visbug-mcp] flush skip suspicious layout-delta', selector, deltaX, deltaY)
           continue
         }
 
@@ -427,6 +446,7 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
         guides()?.attachAlignToChanges?.(layoutMutations, alignRefs)
         const layoutIntents = guides()?.consumeLayoutIntents?.() ?? []
         guides()?.attachLayoutIntentToChanges?.(layoutMutations, layoutIntents)
+        console.log('[visbug-mcp] flush layout-delta ×' + layoutMutations.length, layoutMutations.map((m) => m.selector))
         sendMutations(layoutMutations)
       }
     })
@@ -448,6 +468,7 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
           const styleChanges = parseCSSChanges(record.oldValue, el.getAttribute('style'))
           if (styleChanges.some((c) => POSITION_PROPS.has(c.property))) {
             beginDragSession(el, selector)
+            scheduleFlush()
           }
         }
       }
@@ -474,5 +495,6 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
   })
 
   connect()
-  console.debug('[visbug-mcp] live observer on', location.href)
+  document.documentElement.setAttribute('data-visbug-mcp-live', '1')
+  console.log('[visbug-mcp] live observer on', location.href)
 }

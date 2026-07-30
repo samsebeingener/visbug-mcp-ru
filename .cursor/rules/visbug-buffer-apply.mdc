@@ -6,7 +6,7 @@ description: >
 
   stamps vb-*: при apply перенести id в исходный HTML.
 
-  Контракт projects/visbug-mcp-ru/shared/apply-buffer-contract.md §1.3 и §11.
+  Контракт projects/visbug-mcp-ru/shared/apply-buffer-contract.md §1.3, §11, §12 (JS-инлайн).
 
 alwaysApply: false
 
@@ -18,7 +18,7 @@ alwaysApply: false
 
 
 
-1. **Сначала** `projects/visbug-mcp-ru/shared/apply-buffer-contract.md` (§1.3 закон x_file; §11 auto-stamp; при `src:` — ещё `code-connect-lite-contract.md`)
+1. **Сначала** `projects/visbug-mcp-ru/shared/apply-buffer-contract.md` (§1.3 закон x_file; §11 auto-stamp; §12 JS-инлайн конфликт; при `src:` — ещё `code-connect-lite-contract.md`)
 
 2. Есть **`src: path:line:col`** — открыть этот файл; не угадывать путь по селектору
 

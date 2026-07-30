@@ -171,24 +171,17 @@ export function hasNonTranslateParts(parts) {
 }
 
 /**
+ * Рычаг для визуального сдвига (Position/Move drag).
+ * Закон: визуальный сдвиг НЕ должен двигать соседей — а margin в потоке
+ * толкает всех ниже/правее. Поэтому для layout-delta всегда transform.
+ * Margin-рычаг допустим только из явных правок Margin-инструментом
+ * (style-мутации, не layout-delta).
  * @param {object} parentLayout
  * @returns {'transform' | 'margin'}
  */
 export function suggestLever(parentLayout) {
-  const display = parentLayout?.display ?? parentLayout?.computed?.display ?? ''
-  const justify = parentLayout?.justifyContent ?? parentLayout?.computed?.justifyContent ?? ''
-  const align = parentLayout?.alignItems ?? parentLayout?.computed?.alignItems ?? ''
-
-  if (display === 'flex' && (justify === 'center' || justify === 'space-between')) {
-    return 'transform'
-  }
-  if (display === 'grid' && (align === 'end' || align === 'flex-end')) {
-    return 'transform'
-  }
-  if (display === 'flex' || display === 'inline-flex') {
-    return 'transform'
-  }
-  return 'margin'
+  void parentLayout
+  return 'transform'
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "name": "visbug-mcp-ru",
-  "version": "0.26.0",
+  "version": "0.26.3",
   "type": "module",
   "description": "VisBug Bridge (RU): буфер правок VisBug → копирование в Cursor",
   "author": "Nikita Kulikov <https://samsebeingener.ru>",
