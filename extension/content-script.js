@@ -345,6 +345,125 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
     })
   }
 
+  /** Длительность transition на transform (мс), 0 если нет. */
+  function transformTransitionMs(cs) {
+    const props = (cs.transitionProperty || '').split(',').map((s) => s.trim())
+    const durs = (cs.transitionDuration || '').split(',').map((s) => s.trim())
+    let max = 0
+    props.forEach((p, i) => {
+      if (p !== 'transform' && p !== 'all') return
+      const raw = durs[Math.min(i, durs.length - 1)] || '0s'
+      const v = parseFloat(raw)
+      if (Number.isNaN(v) || v <= 0) return
+      max = Math.max(max, raw.includes('ms') ? v : v * 1000)
+    })
+    return max
+  }
+
+  /** Замер одной сессии → layout-delta mutation | null. */
+  function measureSession(session, timestamp) {
+    const { el, selector, rectBefore, offsetBefore, viewport } = session
+    if (!el?.isConnected) return null
+    const rectAfter = el.getBoundingClientRect()
+    const deltaX = roundPx(rectAfter.left - rectBefore.left)
+    const deltaY = roundPx(rectAfter.top - rectBefore.top)
+    const deltaW = roundPx(rectAfter.width - rectBefore.width)
+    const deltaH = roundPx(rectAfter.height - rectBefore.height)
+    if (deltaX === 0 && deltaY === 0 && deltaW === 0 && deltaH === 0) {
+      console.log('[visbug-mcp] flush skip (delta 0)', selector)
+      return null
+    }
+    const moved = deltaX !== 0 || deltaY !== 0
+    const resized = deltaW !== 0 || deltaH !== 0
+    const editIntent = moved ? (resized ? 'move+resize' : 'move') : 'resize'
+    if (isSuspiciousLayoutDelta(deltaX, deltaY, viewport)) {
+      console.log('[visbug-mcp] flush skip suspicious layout-delta', selector, deltaX, deltaY)
+      return null
+    }
+
+    const rectBeforeRounded = {
+      left: roundPx(rectBefore.left),
+      top: roundPx(rectBefore.top),
+      width: roundPx(rectBefore.width),
+      height: roundPx(rectBefore.height),
+    }
+    const rectAfterRounded = {
+      left: roundPx(rectAfter.left),
+      top: roundPx(rectAfter.top),
+      width: roundPx(rectAfter.width),
+      height: roundPx(rectAfter.height),
+    }
+
+    const layoutContext = guides()?.captureLayoutContext?.(el, getSelector, rectBeforeRounded)
+      ?? null
+    const parentLayout = layoutContext?.parent ?? captureParentLayout(el)
+    const lib = lever()
+    const offsetAfter = lib?.readOffsetFromComputedStyle
+      ? lib.readOffsetFromComputedStyle(getComputedStyle(el))
+      : null
+    const leverHint = lib?.suggestLever
+      ? lib.suggestLever(parentLayout)
+      : 'transform'
+
+    globalThis.VisbugMcpReactBridge?.ensureStamped?.(el)
+    const snapApi = snap()
+    const visbugSrc = snapApi?.readVisbugSrc?.(el)
+      ?? globalThis.VisbugMcpReactBridge?.ensureStamped?.(el)
+      ?? null
+    const stableId = snapApi?.readStableId?.(el) ?? null
+    const sourceRef = snapApi?.readSourceRef?.(el) ?? null
+    const stampId = autoStamp()?.ensureStamped?.(el, getSelector) ?? null
+
+    return {
+      type: 'layout-delta',
+      selector,
+      tag: el.tagName.toLowerCase(),
+      deltaX,
+      deltaY,
+      deltaW,
+      deltaH,
+      editIntent,
+      rectBefore: rectBeforeRounded,
+      rectAfter: rectAfterRounded,
+      offsetBefore,
+      offsetAfter,
+      lever: leverHint,
+      parentLayout,
+      layoutContext: layoutContext ?? undefined,
+      viewport,
+      visbugSrc,
+      stableId,
+      sourceRef,
+      stampId,
+      timestamp,
+    }
+  }
+
+  /** Отправка с прикреплением align/layoutIntent. */
+  function emitLayoutMutations(layoutMutations, suffix = '') {
+    const alignRefs = guides()?.consumeAlignReferences?.() ?? []
+    guides()?.attachAlignToChanges?.(layoutMutations, alignRefs)
+    const layoutIntents = guides()?.consumeLayoutIntents?.() ?? []
+    guides()?.attachLayoutIntentToChanges?.(layoutMutations, layoutIntents)
+    console.log('[visbug-mcp] flush layout-delta ×' + layoutMutations.length + suffix, layoutMutations.map((m) => m.selector))
+    sendMutations(layoutMutations)
+  }
+
+  /** Элемент с transition на transform: замер после transitionend, не сразу. */
+  function deferSessionMeasure(session, waitMs) {
+    const { el, selector } = session
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      console.log('[visbug-mcp] deferred measure after transition', selector)
+      const mut = measureSession(session, Date.now())
+      if (mut) emitLayoutMutations([mut], ' (deferred)')
+    }
+    el.addEventListener('transitionend', finish, { once: true })
+    setTimeout(finish, waitMs + 250)
+  }
+
   function flushDragSessions() {
     if (flushTimer) {
       clearTimeout(flushTimer)
@@ -358,97 +477,23 @@ if (globalThis.__visbugMcpContentScriptLoaded) {
 
     requestAnimationFrame(() => {
       commitScheduled = false
-      const layoutMutations = []
+      const immediate = []
       const timestamp = Date.now()
 
       for (const session of sessions) {
-        const { el, selector, rectBefore, offsetBefore, viewport } = session
+        const { el } = session
         if (!el?.isConnected) continue
-        const rectAfter = el.getBoundingClientRect()
-        const deltaX = roundPx(rectAfter.left - rectBefore.left)
-        const deltaY = roundPx(rectAfter.top - rectBefore.top)
-        const deltaW = roundPx(rectAfter.width - rectBefore.width)
-        const deltaH = roundPx(rectAfter.height - rectBefore.height)
-        if (deltaX === 0 && deltaY === 0 && deltaW === 0 && deltaH === 0) {
-          console.log('[visbug-mcp] flush skip (delta 0)', selector)
+        const waitMs = transformTransitionMs(getComputedStyle(el))
+        if (waitMs > 0) {
+          console.log('[visbug-mcp] defer (transition ' + waitMs + 'ms)', session.selector)
+          deferSessionMeasure(session, waitMs)
           continue
         }
-        const moved = deltaX !== 0 || deltaY !== 0
-        const resized = deltaW !== 0 || deltaH !== 0
-        const editIntent = moved ? (resized ? 'move+resize' : 'move') : 'resize'
-        if (isSuspiciousLayoutDelta(deltaX, deltaY, viewport)) {
-          console.log('[visbug-mcp] flush skip suspicious layout-delta', selector, deltaX, deltaY)
-          continue
-        }
-
-        const rectBeforeRounded = {
-          left: roundPx(rectBefore.left),
-          top: roundPx(rectBefore.top),
-          width: roundPx(rectBefore.width),
-          height: roundPx(rectBefore.height),
-        }
-        const rectAfterRounded = {
-          left: roundPx(rectAfter.left),
-          top: roundPx(rectAfter.top),
-          width: roundPx(rectAfter.width),
-          height: roundPx(rectAfter.height),
-        }
-
-        const layoutContext = guides()?.captureLayoutContext?.(el, getSelector, rectBeforeRounded)
-          ?? null
-        const parentLayout = layoutContext?.parent ?? captureParentLayout(el)
-        const lib = lever()
-        const offsetAfter = lib?.readOffsetFromComputedStyle
-          ? lib.readOffsetFromComputedStyle(getComputedStyle(el))
-          : null
-        const leverHint = lib?.suggestLever
-          ? lib.suggestLever(parentLayout)
-          : 'transform'
-
-        // Code Connect lite: stamp Fiber → data-visbug-src before read
-        globalThis.VisbugMcpReactBridge?.ensureStamped?.(el)
-        const snapApi = snap()
-        const visbugSrc = snapApi?.readVisbugSrc?.(el)
-          ?? globalThis.VisbugMcpReactBridge?.ensureStamped?.(el)
-          ?? null
-        const stableId = snapApi?.readStableId?.(el) ?? null
-        const sourceRef = snapApi?.readSourceRef?.(el) ?? null
-        // v0.26: auto-stamp для узла без стабильного id
-        const stampId = autoStamp()?.ensureStamped?.(el, getSelector) ?? null
-
-        layoutMutations.push({
-          type: 'layout-delta',
-          selector,
-          tag: el.tagName.toLowerCase(),
-          deltaX,
-          deltaY,
-          deltaW,
-          deltaH,
-          editIntent,
-          rectBefore: rectBeforeRounded,
-          rectAfter: rectAfterRounded,
-          offsetBefore,
-          offsetAfter,
-          lever: leverHint,
-          parentLayout,
-          layoutContext: layoutContext ?? undefined,
-          viewport,
-          visbugSrc,
-          stableId,
-          sourceRef,
-          stampId,
-          timestamp,
-        })
+        const mut = measureSession(session, timestamp)
+        if (mut) immediate.push(mut)
       }
 
-      if (layoutMutations.length > 0) {
-        const alignRefs = guides()?.consumeAlignReferences?.() ?? []
-        guides()?.attachAlignToChanges?.(layoutMutations, alignRefs)
-        const layoutIntents = guides()?.consumeLayoutIntents?.() ?? []
-        guides()?.attachLayoutIntentToChanges?.(layoutMutations, layoutIntents)
-        console.log('[visbug-mcp] flush layout-delta ×' + layoutMutations.length, layoutMutations.map((m) => m.selector))
-        sendMutations(layoutMutations)
-      }
+      if (immediate.length > 0) emitLayoutMutations(immediate)
     })
   }
 
