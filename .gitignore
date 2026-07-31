@@ -4,3 +4,7 @@ node_modules/
 
 # Локальная HTML-презентация (не в репо)
 docs/presentation/
+
+# Архив спецификаций до v0.13 (auto-apply, layout-solver — не актуальны)
+docs/archive/
+docs/ROADMAP-data-visbug-src-actions.md

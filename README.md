@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/v0.19-onlook--patterns-зелёный?style=flat-square" alt="onlook-patterns">
+  <img src="https://img.shields.io/badge/v0.26.4-write--recipes-зелёный?style=flat-square" alt="write-recipes">
   <img src="https://img.shields.io/badge/локально-only-зелёный?style=flat-square" alt="только локально">
   <img src="https://img.shields.io/badge/MCP-опционально-blue?style=flat-square" alt="MCP опционально">
   <img src="https://img.shields.io/badge/язык-русский-red?style=flat-square" alt="русский">
@@ -21,12 +21,12 @@
 
 **Recorder-only** (модель [mambari/visbug-mcp](https://github.com/mambari/visbug-mcp)): расширение **не пишет** в файлы проекта. VisBug меняет DOM на странице → bridge сохраняет сырые мутации → вы копируете буфер → Cursor вносит правки в код по контракту.
 
-| Было (до v0.13) | Сейчас (v0.19) |
+| Было (до v0.13) | Сейчас (v0.26) |
 |-----------------|----------------|
 | auto-apply, Actions v2, undo | Удалено (recorder-only) |
 | «Начать запись» / «Стоп» | Не нужно — live-захват при drag |
 | Только inline `top`/`left` | + **`layout-delta`** + **`visbugSrc`** / **`src:`** + per-file summary |
-| Длинный селектор | Короткий селектор + write-recipes v0.26 (`before`/`after`/`snap`) + auto-stamp `vb-*` |
+| Длинный селектор | Короткий селектор + **write-recipes v0.26** (`before`/`after`/`snap`) + **auto-stamp `vb-*`** |
 | `/visbug-apply` | Не нужно — вставка буфера в чат |
 
 ---
@@ -110,7 +110,7 @@ npm run update
 
 ## Как пользоваться
 
-### Рабочий цикл (v0.13)
+### Рабочий цикл (v0.26)
 
 1. Запустите сайт на `http://localhost:…`, откройте в Chrome.
 2. Убедитесь, что origin зарегистрирован (`/visbug-mcp-start` или `npm run setup`).
@@ -236,16 +236,15 @@ visbug-mcp-ru/
 │   ├── sync-cursor-artifacts.mjs
 │   └── start-ws-daemon.ps1
 ├── docs/
-│   ├── INSTALL.ru.md
-│   └── archive/               # старые спеки auto-apply (не актуальны)
+│   └── INSTALL.ru.md
 └── test/
 ```
 
 ---
 
-## Roadmap / архив
+## Roadmap
 
-Идеи auto-apply, layout-solver, `data-visbug-src` — в [`docs/archive/`](docs/archive/) и [ROADMAP](docs/ROADMAP-data-visbug-src-actions.md). В v0.13 **не реализованы**.
+Идеи auto-apply, layout-solver — в архиве спецификаций (не в репо). Актуальные планы: точность записи (transition, keyboard, JS-inline) и предсказуемость применения через Cursor.
 
 ---
 
